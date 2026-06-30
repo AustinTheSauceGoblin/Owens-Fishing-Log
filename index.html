@@ -37,7 +37,7 @@
       padding-bottom: 40px;
     }
     .page.active   { transform: translateX(0); }
-    .page.behind   { transform: translateX(-30%); }
+    .page.behind   { transform: translateX(-100%); pointer-events: none; }
     /* Home page starts visible */
     #page-home { transform: translateX(0); }
 
@@ -643,10 +643,12 @@
       <div class="form-group">
         <label>How many recent catches to show on the home screen</label>
         <select id="settingsPageSize">
-          <option value="4">4</option>
-          <option value="8">8</option>
-          <option value="16">16</option>
-          <option value="20">20</option>
+          <option value="3">3</option>
+          <option value="6">6</option>
+          <option value="9">9</option>
+          <option value="12">12</option>
+          <option value="18">18</option>
+          <option value="24">24</option>
           <option value="9999">Show All</option>
         </select>
       </div>

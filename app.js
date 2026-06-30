@@ -217,8 +217,6 @@ function navTo(pageId) {
   if (pageId === 'page-all-catches') prepAllCatches();
   if (pageId === 'page-tackle')      renderTackleList();
   if (pageId === 'page-rods')        renderRodList();
-  // Only reset the log form for fresh "Log a Catch" entries — NOT when
-  // openEditCatch() has already populated it and is navigating here.
   if (pageId === 'page-log' && !_skipLogReset) {
     document.getElementById('logPageTitle').textContent = 'Log a Catch';
     document.getElementById('logSaveBtn').textContent   = '🎣 Save Catch';
@@ -231,22 +229,42 @@ function navTo(pageId) {
   const curEl  = document.getElementById(current);
   const nextEl = document.getElementById(pageId);
 
-  if (curEl)  { curEl.classList.remove('active'); curEl.classList.add('behind'); }
-  if (nextEl) { nextEl.classList.remove('behind'); nextEl.classList.add('active'); nextEl.scrollTop = 0; }
+  // Hide current page completely off-screen to the left
+  if (curEl) {
+    curEl.classList.remove('active');
+    curEl.classList.add('behind');
+  }
+
+  // Bring next page in from the right
+  if (nextEl) {
+    // Force a reflow so the transition fires correctly
+    nextEl.style.transition = 'none';
+    nextEl.classList.remove('behind', 'active');
+    nextEl.getBoundingClientRect(); // trigger reflow
+    nextEl.style.transition = '';
+    nextEl.classList.add('active');
+    nextEl.scrollTop = 0;
+  }
 
   _pageStack.push(pageId);
 }
 
 function navBack() {
   if (_pageStack.length <= 1) return;
-  const leaving = _pageStack.pop();
+  const leaving   = _pageStack.pop();
   const returning = _pageStack[_pageStack.length - 1];
 
   const leaveEl  = document.getElementById(leaving);
   const returnEl = document.getElementById(returning);
 
-  if (leaveEl)  { leaveEl.classList.remove('active','behind'); leaveEl.style.transform = ''; }
-  if (returnEl) { returnEl.classList.remove('behind'); returnEl.classList.add('active'); }
+  if (leaveEl) {
+    leaveEl.classList.remove('active', 'behind');
+    leaveEl.style.transform = '';
+  }
+  if (returnEl) {
+    returnEl.classList.remove('behind');
+    returnEl.classList.add('active');
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════
