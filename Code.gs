@@ -13,8 +13,9 @@
 // ═══════════════════════════════════════════════════════════
 
 // ── YOUR SHEET ID ───────────────────────────────────────────
-const SHEET_ID  = "YOUR_SHEET_ID_HERE";
-const SHEET_TAB = "Catches";
+const SHEET_ID    = "10rqVPyLthOjmbVY0z9k8bPjidEKc7LK0nhCLo2pVY-s";
+const SHEET_TAB   = "Catches";
+const APPDATA_TAB = "AppData";  // stores tackle/rods/favorites/settings as JSON
 
 // ── COLUMN ORDER (do not reorder without clearing your sheet) ──
 const COLS = [
@@ -56,6 +57,7 @@ function doGet(e) {
   try {
     const action = (e.parameter && e.parameter.action) || "getCatches";
     if (action === "getCatches") return jsonResponse(getCatches());
+    if (action === "getAppData") return jsonResponse(getAppData());
     return jsonResponse({ error: "Unknown GET action: " + action });
   } catch (err) {
     return jsonResponse({ error: err.message });
@@ -69,6 +71,7 @@ function doPost(e) {
     if (action === "addCatch")    return jsonResponse(addCatch(payload));
     if (action === "editCatch")   return jsonResponse(editCatch(payload));
     if (action === "deleteCatch") return jsonResponse(deleteCatch(payload.id));
+    if (action === "saveAppData") return jsonResponse(saveAppData(payload));
     return jsonResponse({ error: "Unknown POST action: " + action });
   } catch (err) {
     return jsonResponse({ error: err.message });
@@ -234,6 +237,86 @@ function savePhoto(dataUrl, id) {
     Logger.log('Photo save error: ' + err.message);
     return '';
   }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  APP DATA SYNC  (tackle, rods, favorites, settings)
+//  Stored as JSON blobs in a simple key/value tab so it never
+//  conflicts with or touches the Catches tab.
+//  Each key has a "lastModified" timestamp for simple
+//  last-write-wins conflict resolution across devices.
+// ═══════════════════════════════════════════════════════════
+
+const APPDATA_KEYS = ["tackle", "rods", "favorites", "settings"];
+
+function getAppData() {
+  const sheet = getAppDataSheet();
+  const rows  = sheet.getDataRange().getValues();
+  const result = {};
+
+  APPDATA_KEYS.forEach(key => result[key] = { value: null, lastModified: 0 });
+
+  rows.slice(1).forEach(row => {
+    const key = String(row[0] || '').trim();
+    if (!APPDATA_KEYS.includes(key)) return;
+    let parsed = null;
+    try { parsed = row[1] ? JSON.parse(row[1]) : null; } catch (e) { parsed = null; }
+    result[key] = {
+      value: parsed,
+      lastModified: row[2] ? new Date(row[2]).getTime() : 0,
+    };
+  });
+
+  return result;
+}
+
+function saveAppData(data) {
+  const sheet = getAppDataSheet();
+  const rows  = sheet.getDataRange().getValues();
+  const now   = new Date();
+
+  // data.updates is an object like { tackle: [...], rods: [...] }
+  // Only keys present in data.updates get written/overwritten.
+  const updates = data.updates || {};
+
+  Object.keys(updates).forEach(key => {
+    if (!APPDATA_KEYS.includes(key)) return;
+    const jsonStr = JSON.stringify(updates[key]);
+
+    // Find existing row for this key
+    let rowIdx = -1;
+    for (let i = 1; i < rows.length; i++) {
+      if (String(rows[i][0]).trim() === key) { rowIdx = i; break; }
+    }
+
+    if (rowIdx >= 0) {
+      sheet.getRange(rowIdx + 1, 2, 1, 2).setValues([[jsonStr, now]]);
+    } else {
+      sheet.appendRow([key, jsonStr, now]);
+    }
+  });
+
+  return { success: true, lastModified: now.getTime() };
+}
+
+function getAppDataSheet() {
+  const ss    = SpreadsheetApp.openById(SHEET_ID);
+  let   sheet = ss.getSheetByName(APPDATA_TAB);
+
+  if (!sheet) {
+    sheet = ss.insertSheet(APPDATA_TAB);
+    sheet.appendRow(["Key", "ValueJSON", "LastModified"]);
+    const hdr = sheet.getRange(1, 1, 1, 3);
+    hdr.setFontWeight('bold');
+    hdr.setBackground('#4a6741');
+    hdr.setFontColor('#ffffff');
+    sheet.setFrozenRows(1);
+    sheet.setColumnWidth(1, 120);
+    sheet.setColumnWidth(2, 500);
+    sheet.setColumnWidth(3, 160);
+  }
+
+  return sheet;
 }
 
 // ═══════════════════════════════════════════════════════════
