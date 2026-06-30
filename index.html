@@ -1,0 +1,682 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>The Fishing Log</title>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700;900&family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --ink:       #1a1a14;
+      --parchment: #f4f0e6;
+      --cream:     #faf8f2;
+      --water:     #2c6e8a;
+      --water-lt:  #4a9bbe;
+      --water-dk:  #1a4a60;
+      --moss:      #4a6741;
+      --gold:      #c8973a;
+      --rust:      #b84c2a;
+      --heart:     #d94f4f;
+      --line:      rgba(44,110,138,.18);
+      --shadow:    0 4px 24px rgba(26,26,20,.12);
+      --r:         10px;
+      --nav-h:     58px;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; overflow: hidden; font-family: 'DM Sans', sans-serif; background: var(--parchment); color: var(--ink); }
+
+    /* ── PAGE SYSTEM ── */
+    #page-root { position: fixed; inset: 0; overflow: hidden; }
+    .page {
+      position: absolute; inset: 0;
+      overflow-y: auto; overflow-x: hidden;
+      background: var(--parchment);
+      transform: translateX(100%);
+      transition: transform .32s cubic-bezier(.4,0,.2,1);
+      will-change: transform;
+      padding-bottom: 40px;
+    }
+    .page.active   { transform: translateX(0); }
+    .page.behind   { transform: translateX(-30%); }
+    /* Home page starts visible */
+    #page-home { transform: translateX(0); }
+
+    /* ── NAV BAR ── */
+    .nav-bar {
+      position: sticky; top: 0; z-index: 100;
+      height: var(--nav-h);
+      background: rgba(250,248,242,.94);
+      backdrop-filter: blur(10px);
+      border-bottom: 1px solid var(--line);
+      display: flex; align-items: center;
+      padding: 0 16px; gap: 12px;
+    }
+    .nav-back {
+      background: none; border: none; cursor: pointer;
+      display: flex; align-items: center; gap: 6px;
+      font-family: 'DM Mono', monospace; font-size: .8rem;
+      color: var(--water); padding: 8px 4px; letter-spacing: .04em;
+    }
+    .nav-back:hover { color: var(--water-dk); }
+    .nav-back svg { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+    .nav-title {
+      flex: 1; font-family: 'Playfair Display', serif;
+      font-size: 1.15rem; font-weight: 700; color: var(--water-dk);
+    }
+    .nav-action { margin-left: auto; }
+
+    /* ── HOME HEADER ── */
+    .home-header {
+      background: linear-gradient(160deg, var(--water-dk) 0%, var(--water) 100%);
+      padding: 36px 20px 28px;
+      color: #fff;
+    }
+    .home-header h1 { font-family: 'Playfair Display', serif; font-size: clamp(1.8rem,5vw,2.8rem); font-weight: 900; line-height: 1; letter-spacing: -1px; }
+    .home-header .tagline { font-family: 'DM Mono', monospace; font-size: .72rem; letter-spacing: .14em; text-transform: uppercase; opacity: .7; margin-top: 6px; }
+    .home-header-actions { display: flex; gap: 8px; margin-top: 20px; flex-wrap: wrap; }
+
+    /* ── BUTTONS ── */
+    .btn { font-family: 'DM Mono', monospace; font-size: .76rem; letter-spacing: .06em; text-transform: uppercase; padding: 10px 18px; border-radius: 8px; border: 2px solid transparent; cursor: pointer; transition: all .18s; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+    .btn-primary { background: var(--water); color: #fff; border-color: var(--water); }
+    .btn-primary:hover { background: var(--water-dk); border-color: var(--water-dk); }
+    .btn-white  { background: #fff; color: var(--water-dk); border-color: rgba(255,255,255,.3); }
+    .btn-white:hover { background: rgba(255,255,255,.9); }
+    .btn-outline { background: transparent; color: var(--water); border-color: var(--water); }
+    .btn-outline:hover { background: var(--water); color: #fff; }
+    .btn-ghost { background: rgba(255,255,255,.12); color: #fff; border-color: rgba(255,255,255,.2); }
+    .btn-ghost:hover { background: rgba(255,255,255,.22); }
+    .btn-sm  { padding: 6px 12px; font-size: .68rem; }
+    .btn-xs  { padding: 3px 8px;  font-size: .62rem; }
+    .btn-danger { background: var(--rust); color: #fff; border-color: var(--rust); }
+    .btn-danger:hover { filter: brightness(.9); }
+
+    /* ── CONTENT WRAP ── */
+    .page-content { max-width: 900px; margin: 0 auto; padding: 20px 16px 40px; }
+
+    /* ── STATS GRID ── */
+    .stats-strip { display: grid; grid-template-columns: repeat(auto-fit,minmax(110px,1fr)); gap: 10px; margin: 20px 16px 0; }
+    .stat-card { background: #fff; border-radius: var(--r); padding: 14px 16px; border: 1px solid var(--line); box-shadow: var(--shadow); position: relative; overflow: hidden; }
+    .stat-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg,var(--water),var(--water-lt)); }
+    .stat-card-clickable { cursor: pointer; transition: transform .18s, box-shadow .18s; }
+    .stat-card-clickable:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(26,26,20,.14); }
+    .stat-label { font-family: 'DM Mono', monospace; font-size: .6rem; letter-spacing: .1em; text-transform: uppercase; color: var(--water); margin-bottom: 5px; }
+    .stat-value { font-family: 'Playfair Display', serif; font-size: 1.6rem; font-weight: 700; color: var(--ink); line-height: 1; }
+    .stat-sub { font-size: .68rem; color: #aaa; margin-top: 3px; }
+
+    /* ── CONTROLS ── */
+    .controls { display: flex; gap: 8px; margin: 16px 16px 0; flex-wrap: wrap; align-items: center; }
+    .controls select, .controls input { font-family: 'DM Sans', sans-serif; font-size: .84rem; padding: 7px 11px; border-radius: 6px; border: 1.5px solid var(--line); background: #fff; color: var(--ink); outline: none; }
+    .controls select:focus, .controls input:focus { border-color: var(--water); }
+    .controls input { min-width: 140px; }
+
+    /* ── SECTION TITLE ── */
+    .section-title { font-family: 'Playfair Display', serif; font-size: 1.2rem; font-weight: 700; color: var(--water-dk); margin: 24px 16px 12px; display: flex; align-items: center; gap: 10px; }
+    .section-title::after { content: ''; flex: 1; height: 1px; background: var(--line); }
+    .section-title-heart::after { background: linear-gradient(90deg,rgba(217,79,79,.3),transparent); }
+
+    /* ── SPECIES CARDS ── */
+    .fish-breakdown { display: grid; grid-template-columns: repeat(auto-fill,minmax(220px,1fr)); gap: 12px; margin: 0 16px 8px; }
+    .fish-card { background: #fff; border-radius: var(--r); padding: 12px 14px; border: 1px solid var(--line); box-shadow: var(--shadow); display: flex; align-items: center; gap: 12px; cursor: pointer; transition: transform .18s, box-shadow .18s, border-color .18s; }
+    .fish-card:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(26,26,20,.14); border-color: var(--water-lt); }
+    .fish-icon { font-size: 1.6rem; width: 40px; height: 40px; background: var(--parchment); border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .fish-info { flex: 1; min-width: 0; }
+    .fish-name { font-family: 'Playfair Display', serif; font-weight: 700; font-size: .92rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .fish-stats { font-family: 'DM Mono', monospace; font-size: .63rem; color: var(--water); margin-top: 2px; line-height: 1.7; }
+    .click-hint { font-family: 'DM Mono', monospace; font-size: .56rem; color: #ccc; margin-top: 2px; }
+
+    /* ── STATE CARDS ── */
+    .state-breakdown { display: grid; grid-template-columns: repeat(auto-fill,minmax(160px,1fr)); gap: 10px; margin: 0 16px 8px; }
+    .state-card { background: #fff; border-radius: var(--r); padding: 11px 13px; border: 1px solid var(--line); box-shadow: var(--shadow); display: flex; align-items: center; gap: 10px; cursor: pointer; transition: transform .18s, box-shadow .18s, border-color .18s; }
+    .state-card:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(26,26,20,.14); border-color: var(--water-lt); }
+    .state-flag { font-size: 1.3rem; flex-shrink: 0; width: 36px; height: 36px; background: var(--parchment); border-radius: 50%; display: flex; align-items: center; justify-content: center; }
+    .state-name { font-family: 'Playfair Display', serif; font-weight: 700; font-size: .86rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .state-count { font-family: 'DM Mono', monospace; font-size: .66rem; color: var(--water); margin-top: 2px; }
+
+    /* ── CATCH GRID ── */
+    .catch-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(270px,1fr)); gap: 14px; margin: 0 16px; }
+    .page-content .catch-grid { margin: 0; }
+    .catch-card { background: #fff; border-radius: var(--r); border: 1px solid var(--line); box-shadow: var(--shadow); overflow: hidden; transition: transform .2s, box-shadow .2s; animation: fadeUp .3s ease both; position: relative; }
+    .catch-card:hover { transform: translateY(-3px); box-shadow: 0 8px 28px rgba(26,26,20,.16); }
+    @keyframes fadeUp { from { opacity:0; transform:translateY(14px); } to { opacity:1; transform:translateY(0); } }
+    .catch-photo-wrap { cursor: pointer; display: block; position: relative; }
+    .catch-photo { width: 100%; aspect-ratio: 1/1; object-fit: cover; object-position: center; display: block; background: #d8eaf2; }
+    .catch-photo-placeholder { width: 100%; aspect-ratio: 1/1; background: linear-gradient(135deg,#e8f4f8,#d0e8f0); display: flex; align-items: center; justify-content: center; font-size: 3rem; }
+    .heart-btn { position: absolute; top: 8px; right: 8px; background: rgba(255,255,255,.88); border: none; border-radius: 50%; width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; font-size: 1rem; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,.18); transition: transform .18s; z-index: 2; }
+    .heart-btn:hover { transform: scale(1.18); }
+    .catch-body { padding: 12px 14px 14px; cursor: pointer; }
+    .catch-fish-name { font-family: 'Playfair Display', serif; font-size: 1.1rem; font-weight: 700; }
+    .catch-meta { font-family: 'DM Mono', monospace; font-size: .66rem; color: var(--water); margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px 9px; }
+    .catch-tags { margin-top: 7px; display: flex; flex-wrap: wrap; gap: 4px; }
+    .tag { font-family: 'DM Mono', monospace; font-size: .62rem; padding: 2px 7px; border-radius: 20px; background: var(--parchment); color: var(--water-dk); border: 1px solid rgba(44,110,138,.2); }
+    .catch-tap-hint { font-family: 'DM Mono', monospace; font-size: .58rem; color: #ccc; margin-top: 7px; }
+    .fav-card { border-color: rgba(217,79,79,.25); }
+    .fav-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg,var(--heart),#e87a7a); }
+    .catch-log-footer { display: flex; justify-content: center; margin: 16px 0 4px; }
+    .catch-log-count { font-family: 'DM Mono', monospace; font-size: .72rem; color: #aaa; text-align: center; margin: 8px 0; }
+
+    /* ── EMPTY ── */
+    .empty-state { text-align: center; padding: 40px 20px; color: #aaa; grid-column: 1/-1; }
+    .empty-state .fish-big { font-size: 3rem; margin-bottom: 12px; }
+    .empty-state h3 { font-family: 'Playfair Display', serif; font-size: 1.15rem; color: #bbb; }
+    .empty-state p { margin-top: 6px; font-size: .84rem; }
+
+    /* ── LIST ROWS (all catches, buddies, spots, drill-down) ── */
+    .list-rows { display: flex; flex-direction: column; gap: 8px; }
+    .list-row { display: flex; align-items: center; gap: 12px; background: #fff; border-radius: 10px; padding: 12px 14px; cursor: pointer; border: 1px solid var(--line); transition: border-color .15s, transform .15s; box-shadow: var(--shadow); }
+    .list-row:hover { border-color: var(--water-lt); transform: translateX(3px); }
+    .list-thumb { width: 50px; height: 50px; border-radius: 8px; object-fit: cover; flex-shrink: 0; background: #d8eaf2; }
+    .list-thumb-placeholder { width: 50px; height: 50px; border-radius: 8px; background: linear-gradient(135deg,#e8f4f8,#d0e8f0); display: flex; align-items: center; justify-content: center; font-size: 1.5rem; flex-shrink: 0; }
+    .list-avatar { width: 50px; height: 50px; border-radius: 50%; background: linear-gradient(135deg,var(--water),var(--water-lt)); display: flex; align-items: center; justify-content: center; font-size: 1.1rem; flex-shrink: 0; color: #fff; font-family: 'Playfair Display',serif; font-weight: 700; }
+    .list-avatar-spot { background: linear-gradient(135deg,var(--moss),#6a9460); }
+    .list-info { flex: 1; min-width: 0; }
+    .list-name { font-family: 'Playfair Display', serif; font-weight: 700; font-size: .95rem; }
+    .list-meta { font-family: 'DM Mono', monospace; font-size: .66rem; color: var(--water); margin-top: 2px; }
+    .list-count { font-family: 'Playfair Display', serif; font-size: 1.3rem; font-weight: 700; color: var(--water-dk); flex-shrink: 0; }
+    .list-arrow { color: #ccc; font-size: .9rem; flex-shrink: 0; }
+
+    /* ── CATCH DETAIL PAGE ── */
+    .detail-photo { width: 100%; height: auto; max-height: 65vh; object-fit: contain; display: block; background: #111; }
+    .detail-photo-placeholder { width: 100%; height: 200px; background: linear-gradient(135deg,#e8f4f8,#d0e8f0); display: flex; align-items: center; justify-content: center; font-size: 4rem; }
+    .detail-fish-name { font-family: 'Playfair Display', serif; font-size: 1.7rem; font-weight: 900; color: var(--water-dk); margin-bottom: 14px; }
+    .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+    .detail-item { background: #fff; border-radius: 8px; padding: 10px 12px; border: 1px solid var(--line); }
+    .detail-item-label { font-family: 'DM Mono', monospace; font-size: .6rem; letter-spacing: .1em; text-transform: uppercase; color: var(--water); margin-bottom: 3px; }
+    .detail-item-value { font-size: .86rem; font-weight: 500; line-height: 1.4; }
+    .detail-notes { background: #fff; border-radius: 8px; padding: 12px; margin-bottom: 12px; font-size: .86rem; line-height: 1.5; border: 1px solid var(--line); }
+    .detail-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+
+    /* ── FORM PAGE ── */
+    .form-wrap { max-width: 640px; margin: 0 auto; padding: 0 16px 40px; }
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .form-group { margin-bottom: 14px; }
+    .form-group label { display: block; font-family: 'DM Mono', monospace; font-size: .68rem; letter-spacing: .08em; text-transform: uppercase; color: var(--water-dk); margin-bottom: 5px; }
+    .form-group input, .form-group select, .form-group textarea { width: 100%; padding: 10px 13px; border-radius: 8px; border: 1.5px solid #ddd; font-family: 'DM Sans', sans-serif; font-size: .9rem; background: #fff; color: var(--ink); outline: none; transition: border-color .18s; }
+    .form-group input:focus, .form-group select:focus, .form-group textarea:focus { border-color: var(--water); box-shadow: 0 0 0 3px rgba(44,110,138,.1); }
+    .form-group textarea { min-height: 72px; resize: vertical; }
+    .photo-preview { width: 100%; max-height: 200px; object-fit: cover; border-radius: 8px; margin-top: 8px; display: none; border: 1.5px solid #ddd; }
+    .photo-preview.show { display: block; }
+    .form-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px; flex-wrap: wrap; }
+
+    /* ── GEAR PAGES ── */
+    .gear-list { display: flex; flex-direction: column; gap: 7px; margin-bottom: 20px; }
+    .gear-item { display: flex; align-items: center; gap: 10px; background: #fff; border-radius: 9px; padding: 10px 13px; border: 1px solid var(--line); cursor: pointer; transition: border-color .15s; box-shadow: var(--shadow); }
+    .gear-item:hover { border-color: var(--water-lt); }
+    .gear-item-icon { font-size: 1.2rem; flex-shrink: 0; }
+    .gear-item-info { flex: 1; min-width: 0; }
+    .gear-item-name { font-weight: 500; font-size: .9rem; }
+    .gear-item-detail { font-family: 'DM Mono', monospace; font-size: .66rem; color: var(--water); margin-top: 1px; }
+    .gear-item-actions { display: flex; gap: 5px; align-items: center; flex-shrink: 0; }
+    .default-badge { font-family: 'DM Mono', monospace; font-size: .58rem; background: var(--moss); color: #fff; padding: 2px 7px; border-radius: 10px; }
+    .catch-count-badge { font-family: 'DM Mono', monospace; font-size: .6rem; background: var(--water); color: #fff; padding: 2px 8px; border-radius: 10px; }
+    .gear-add-section { border-top: 1px solid var(--line); padding-top: 18px; margin-top: 4px; }
+    .gear-add-label { font-family: 'DM Mono', monospace; font-size: .68rem; letter-spacing: .08em; text-transform: uppercase; color: var(--water-dk); margin-bottom: 10px; }
+    .gear-add-inputs { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+    .gear-add-inputs input { font-family: 'DM Sans', sans-serif; font-size: .88rem; padding: 10px 12px; border-radius: 8px; border: 1.5px solid #ddd; background: #fff; color: var(--ink); outline: none; width: 100%; transition: border-color .18s; }
+    .gear-add-inputs input:focus { border-color: var(--water); }
+    .gear-add-btn-row { display: flex; justify-content: flex-end; }
+
+    /* ── GEAR DETAIL PAGE ── */
+    .gear-detail-icon { font-size: 3rem; text-align: center; margin: 4px 0 16px; }
+    .gear-detail-name { font-family: 'Playfair Display', serif; font-size: 1.5rem; font-weight: 900; color: var(--water-dk); text-align: center; margin-bottom: 18px; }
+    .gear-detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 16px; }
+    .gear-detail-item { background: #fff; border-radius: 8px; padding: 10px 12px; border: 1px solid var(--line); }
+    .gear-detail-label { font-family: 'DM Mono', monospace; font-size: .6rem; letter-spacing: .1em; text-transform: uppercase; color: var(--water); margin-bottom: 3px; }
+    .gear-detail-value { font-size: .88rem; font-weight: 500; }
+    .gear-edit-form { display: none; flex-direction: column; gap: 10px; margin-top: 16px; border-top: 1px solid var(--line); padding-top: 16px; }
+    .gear-edit-form.show { display: flex; }
+    .gear-edit-form input { font-family: 'DM Sans', sans-serif; font-size: .9rem; padding: 10px 12px; border-radius: 8px; border: 1.5px solid #ddd; background: #fff; color: var(--ink); outline: none; }
+    .gear-edit-form input:focus { border-color: var(--water); }
+
+    /* ── SETTINGS PAGE ── */
+    .settings-section-title { font-family: 'DM Mono', monospace; font-size: .68rem; letter-spacing: .12em; text-transform: uppercase; color: var(--water); border-bottom: 1px solid var(--line); padding-bottom: 8px; margin-bottom: 14px; margin-top: 8px; }
+
+    /* ── CONFIG BANNER ── */
+    .config-banner { background: #fff8e8; border: 2px solid var(--gold); border-radius: var(--r); padding: 16px 20px; margin: 16px; display: flex; gap: 12px; align-items: flex-start; }
+    .config-banner h3 { font-family: 'Playfair Display', serif; font-weight: 700; margin-bottom: 5px; color: #7a5a10; }
+    .config-banner p { font-size: .84rem; color: #7a5a10; line-height: 1.5; }
+    .config-banner code { background: #f4e9c8; padding: 1px 5px; border-radius: 4px; font-family: 'DM Mono', monospace; font-size: .78rem; }
+
+    /* ── SHARE ── */
+    .share-info { background: var(--parchment); border-radius: 8px; padding: 12px 14px; font-family: 'DM Mono', monospace; font-size: .78rem; color: var(--water-dk); word-break: break-all; border: 1px solid var(--line); margin: 10px 0; }
+
+    /* ── LOADING / TOAST ── */
+    .spinner { width: 28px; height: 28px; border: 3px solid var(--line); border-top-color: var(--water); border-radius: 50%; animation: spin .7s linear infinite; margin: 40px auto; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loading-overlay { display: none; position: fixed; inset: 0; background: rgba(244,240,230,.75); z-index: 9000; align-items: center; justify-content: center; flex-direction: column; gap: 12px; font-family: 'DM Mono', monospace; font-size: .85rem; color: var(--water-dk); }
+    .loading-overlay.active { display: flex; }
+    .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(80px); background: var(--water-dk); color: #fff; font-family: 'DM Mono', monospace; font-size: .8rem; padding: 12px 20px; border-radius: 10px; box-shadow: 0 4px 20px rgba(0,0,0,.3); opacity: 0; transition: all .3s ease; z-index: 9001; white-space: nowrap; }
+    .toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
+    .toast.error { background: var(--rust); }
+    .toast.success { background: var(--moss); }
+
+    @media (max-width: 560px) {
+      .form-row { grid-template-columns: 1fr; }
+      .catch-grid { grid-template-columns: 1fr; }
+      .detail-grid, .gear-detail-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+<div id="page-root">
+
+  <!-- ════════════════════ HOME PAGE ════════════════════ -->
+  <div class="page active" id="page-home">
+
+    <div class="home-header">
+      <h1>🎣 The Fishing Log</h1>
+      <div class="tagline" id="logOwnerLabel">Loading…</div>
+      <div class="tagline" id="syncIndicator" style="opacity:0;transition:opacity .3s;margin-top:4px"></div>
+      <div class="home-header-actions">
+        <button class="btn btn-white" onclick="navTo('page-log')">+ Log a Catch</button>
+        <button class="btn btn-ghost" onclick="navTo('page-tackle')">🧰 Tackle Box</button>
+        <button class="btn btn-ghost" onclick="navTo('page-rods')">🎣 Rod Rack</button>
+        <button class="btn btn-ghost" onclick="navTo('page-settings')">⚙️ Settings</button>
+      </div>
+    </div>
+
+    <div class="config-banner" id="configBanner" style="display:none">
+      <span style="font-size:1.4rem">⚙️</span>
+      <div>
+        <h3>Setup Required</h3>
+        <p>Open <code>config.js</code>, paste your Google Apps Script Web App URL, then refresh.</p>
+      </div>
+    </div>
+
+    <div class="stats-strip">
+      <div class="stat-card"><div class="stat-label">Total Catches</div><div class="stat-value" id="statTotal">—</div></div>
+      <div class="stat-card"><div class="stat-label">Species</div><div class="stat-value" id="statSpecies">—</div></div>
+      <div class="stat-card"><div class="stat-label">Biggest Fish</div><div class="stat-value" id="statBiggest">—</div><div class="stat-sub" id="statBiggestFish"></div></div>
+      <div class="stat-card"><div class="stat-label">States</div><div class="stat-value" id="statStates">—</div></div>
+      <div class="stat-card"><div class="stat-label">Trips</div><div class="stat-value" id="statTrips">—</div></div>
+      <div class="stat-card"><div class="stat-label">Favorites</div><div class="stat-value" id="statFavs">—</div></div>
+      <div class="stat-card stat-card-clickable" onclick="navTo('page-buddies')"><div class="stat-label">Buddies</div><div class="stat-value" id="statBuddies">—</div><div class="stat-sub">tap →</div></div>
+      <div class="stat-card stat-card-clickable" onclick="navTo('page-spots')"><div class="stat-label">Spots</div><div class="stat-value" id="statSpots">—</div><div class="stat-sub">tap →</div></div>
+    </div>
+
+    <div class="controls">
+      <select id="filterTrip" onchange="applyFilters()"><option value="">All Trips</option></select>
+      <select id="filterFish" onchange="applyFilters()"><option value="">All Species</option></select>
+      <select id="filterState" onchange="applyFilters()"><option value="">All States</option></select>
+      <select id="filterLure" onchange="applyFilters()"><option value="">All Lures</option></select>
+      <select id="filterMonth" onchange="applyFilters()">
+        <option value="">All Months</option>
+        <option value="0">January</option><option value="1">February</option>
+        <option value="2">March</option><option value="3">April</option>
+        <option value="4">May</option><option value="5">June</option>
+        <option value="6">July</option><option value="7">August</option>
+        <option value="8">September</option><option value="9">October</option>
+        <option value="10">November</option><option value="11">December</option>
+      </select>
+      <input type="text" id="searchInput" placeholder="Search…" oninput="applyFilters()" />
+      <button class="btn btn-outline btn-sm" onclick="clearFilters()">✕ Clear</button>
+    </div>
+
+    <div class="section-title">By Species</div>
+    <div class="fish-breakdown" id="fishBreakdown"><div class="spinner"></div></div>
+
+    <div class="section-title">By State</div>
+    <div class="state-breakdown" id="stateBreakdown"><div class="spinner"></div></div>
+
+    <div class="section-title section-title-heart">❤️ Favorites</div>
+    <div class="catch-grid" id="favGrid" style="margin-bottom:24px"><div class="spinner"></div></div>
+
+    <div class="section-title">Catch Log</div>
+    <div class="catch-grid" id="catchGrid"><div class="spinner"></div></div>
+    <div class="catch-log-count" id="catchLogCount" style="margin:8px 16px 0"></div>
+    <div class="catch-log-footer" id="catchLogFooter" style="display:none">
+      <button class="btn btn-outline" onclick="navTo('page-all-catches')">📋 View All Catches</button>
+    </div>
+
+  </div><!-- /page-home -->
+
+
+  <!-- ════════════════════ LOG A CATCH PAGE ════════════════════ -->
+  <div class="page" id="page-log">
+    <div class="nav-bar">
+      <button class="nav-back" onclick="navBack()">
+        <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+        Home
+      </button>
+      <span class="nav-title" id="logPageTitle">Log a Catch</span>
+    </div>
+    <div class="form-wrap">
+      <input type="hidden" id="fEditId" />
+      <input type="hidden" id="fExistingPhoto" />
+      <div class="form-row">
+        <div class="form-group">
+          <label>Fish Type *</label>
+          <input type="text" id="fFish" placeholder="Bass, Trout…" list="fishSuggestions" />
+          <datalist id="fishSuggestions">
+            <option value="Largemouth Bass"><option value="Smallmouth Bass">
+            <option value="Rainbow Trout"><option value="Brown Trout"><option value="Brook Trout">
+            <option value="Walleye"><option value="Northern Pike"><option value="Muskie">
+            <option value="Catfish"><option value="Crappie"><option value="Bluegill">
+            <option value="Salmon"><option value="Striped Bass"><option value="Carp">
+            <option value="Redfish"><option value="Snook"><option value="Tarpon">
+          </datalist>
+        </div>
+        <div class="form-group">
+          <label>Weight (lbs)</label>
+          <input type="number" id="fWeight" step="0.01" min="0" placeholder="3.75" />
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Date &amp; Time *</label>
+          <input type="datetime-local" id="fDate" />
+        </div>
+        <div class="form-group">
+          <label>Lure / Bait</label>
+          <select id="fLure"><option value="">— Tackle Box —</option></select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Custom Lure (overrides dropdown)</label>
+        <input type="text" id="fLureCustom" placeholder="Type a lure not in your tackle box…" />
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Rod Used</label>
+          <select id="fRod"><option value="">— Rod Rack —</option></select>
+        </div>
+        <div class="form-group">
+          <label>Fished With</label>
+          <input type="text" id="fWith" placeholder="Dad, Jake, Solo…" list="buddySuggestions" autocomplete="off" />
+          <datalist id="buddySuggestions"></datalist>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Location</label>
+          <input type="text" id="fLocation" placeholder="Lake Okeechobee…" list="locationSuggestions" autocomplete="off" />
+          <datalist id="locationSuggestions"></datalist>
+        </div>
+        <div class="form-group">
+          <label>State</label>
+          <select id="fState"></select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Trip Tag</label>
+        <input type="text" id="fTrip" placeholder="Yellowstone 2026…" list="tripSuggestions" />
+        <datalist id="tripSuggestions"></datalist>
+      </div>
+      <div class="form-group">
+        <label>Notes</label>
+        <textarea id="fNotes" placeholder="Water temp, conditions, anything memorable…"></textarea>
+      </div>
+      <div class="form-group">
+        <label>Photo <small style="font-weight:300;text-transform:none;letter-spacing:0;font-family:'DM Sans',sans-serif">(editing: leave blank to keep existing)</small></label>
+        <input type="file" id="fPhoto" accept="image/*" onchange="previewPhoto()" />
+        <img id="fPhotoPreview" class="photo-preview" alt="Preview" />
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-outline" onclick="navBack()">Cancel</button>
+        <button class="btn btn-primary" id="logSaveBtn" onclick="submitCatch()">🎣 Save Catch</button>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ════════════════════ CATCH DETAIL PAGE ════════════════════ -->
+  <div class="page" id="page-detail">
+    <div class="nav-bar">
+      <button class="nav-back" onclick="navBack()">
+        <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+        Back
+      </button>
+      <span class="nav-title">Catch Details</span>
+    </div>
+    <div id="detailPageBody"></div>
+  </div>
+
+
+  <!-- ════════════════════ ALL CATCHES PAGE ════════════════════ -->
+  <div class="page" id="page-all-catches">
+    <div class="nav-bar">
+      <button class="nav-back" onclick="navBack()">
+        <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+        Home
+      </button>
+      <span class="nav-title" id="allCatchesTitle">All Catches</span>
+    </div>
+    <div class="page-content">
+      <div class="catch-grid" id="allCatchesBody"></div>
+    </div>
+  </div>
+
+
+  <!-- ════════════════════ DRILL-DOWN PAGE (species/state) ════════════════════ -->
+  <div class="page" id="page-drilldown">
+    <div class="nav-bar">
+      <button class="nav-back" onclick="navBack()">
+        <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+        Back
+      </button>
+      <span class="nav-title" id="drilldownTitle">Catches</span>
+    </div>
+    <div class="page-content">
+      <div class="catch-grid" id="drilldownBody"></div>
+    </div>
+  </div>
+
+
+  <!-- ════════════════════ TACKLE BOX PAGE ════════════════════ -->
+  <div class="page" id="page-tackle">
+    <div class="nav-bar">
+      <button class="nav-back" onclick="navBack()">
+        <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+        Home
+      </button>
+      <span class="nav-title">🧰 Tackle Box</span>
+    </div>
+    <div class="page-content">
+      <p style="font-size:.84rem;color:#888;margin-bottom:16px">Tap a lure to view details or edit. Shows as "Name (Color)" in the catch form.</p>
+      <div class="gear-list" id="tackleList"></div>
+      <div class="gear-add-section">
+        <div class="gear-add-label">Add New Lure</div>
+        <div class="gear-add-inputs">
+          <input type="text" id="tName"    placeholder="Lure Name * (e.g. Spinnerbait)" />
+          <input type="text" id="tColor"   placeholder="Color (e.g. Chartreuse)" />
+          <input type="text" id="tBrand"   placeholder="Brand (e.g. Strike King)" />
+          <input type="text" id="tDetails" placeholder="Details (e.g. 3/8 oz, #4 hook)" />
+        </div>
+        <div class="gear-add-btn-row">
+          <button class="btn btn-primary btn-sm" onclick="addTackle()">+ Add Lure</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ════════════════════ LURE DETAIL PAGE ════════════════════ -->
+  <div class="page" id="page-tackle-detail">
+    <div class="nav-bar">
+      <button class="nav-back" onclick="navBack()">
+        <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+        Tackle Box
+      </button>
+      <span class="nav-title">Lure Details</span>
+    </div>
+    <div class="page-content">
+      <div class="gear-detail-icon">🪱</div>
+      <div class="gear-detail-name" id="tackleDetailName"></div>
+      <div class="gear-detail-grid" id="tackleDetailGrid"></div>
+      <div class="gear-edit-form" id="tackleEditForm">
+        <input type="text" id="teNameInput"    placeholder="Lure Name *" />
+        <input type="text" id="teColorInput"   placeholder="Color" />
+        <input type="text" id="teBrandInput"   placeholder="Brand" />
+        <input type="text" id="teDetailsInput" placeholder="Details" />
+      </div>
+      <div class="detail-actions" id="tackleDetailActions" style="margin-top:16px"></div>
+    </div>
+  </div>
+
+
+  <!-- ════════════════════ ROD RACK PAGE ════════════════════ -->
+  <div class="page" id="page-rods">
+    <div class="nav-bar">
+      <button class="nav-back" onclick="navBack()">
+        <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+        Home
+      </button>
+      <span class="nav-title">🎣 Rod Rack</span>
+    </div>
+    <div class="page-content">
+      <p style="font-size:.84rem;color:#888;margin-bottom:16px">Tap a rod to view details, edit, or set as default.</p>
+      <div class="gear-list" id="rodList"></div>
+      <div class="gear-add-section">
+        <div class="gear-add-label">Add New Rod</div>
+        <div class="gear-add-inputs">
+          <input type="text" id="rNickname" placeholder="Nickname * (e.g. The Beast)" />
+          <input type="text" id="rRod"      placeholder="Rod (e.g. Ugly Stik 7ft Medium)" />
+          <input type="text" id="rReel"     placeholder="Reel (e.g. Shimano Stradic 2500)" />
+        </div>
+        <div class="gear-add-btn-row">
+          <button class="btn btn-primary btn-sm" onclick="addRod()">+ Add Rod</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ════════════════════ ROD DETAIL PAGE ════════════════════ -->
+  <div class="page" id="page-rod-detail">
+    <div class="nav-bar">
+      <button class="nav-back" onclick="navBack()">
+        <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+        Rod Rack
+      </button>
+      <span class="nav-title">Rod Details</span>
+    </div>
+    <div class="page-content">
+      <div class="gear-detail-icon">🎣</div>
+      <div class="gear-detail-name" id="rodDetailName"></div>
+      <div class="gear-detail-grid" id="rodDetailGrid"></div>
+      <div class="gear-edit-form" id="rodEditForm">
+        <input type="text" id="reNicknameInput" placeholder="Nickname *" />
+        <input type="text" id="reRodInput"      placeholder="Rod" />
+        <input type="text" id="reReelInput"     placeholder="Reel" />
+      </div>
+      <div class="detail-actions" id="rodDetailActions" style="margin-top:16px"></div>
+    </div>
+  </div>
+
+
+  <!-- ════════════════════ FISHING BUDDIES PAGE ════════════════════ -->
+  <div class="page" id="page-buddies">
+    <div class="nav-bar">
+      <button class="nav-back" onclick="navBack()">
+        <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+        Home
+      </button>
+      <span class="nav-title">🧑‍🤝‍🧑 Fishing Buddies</span>
+    </div>
+    <div class="page-content" id="buddiesPageBody"></div>
+  </div>
+
+
+  <!-- ════════════════════ BUDDY CATCHES PAGE ════════════════════ -->
+  <div class="page" id="page-buddy-catches">
+    <div class="nav-bar">
+      <button class="nav-back" onclick="navBack()">
+        <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+        Buddies
+      </button>
+      <span class="nav-title" id="buddyCatchesTitle">Catches</span>
+    </div>
+    <div class="page-content">
+      <div class="catch-grid" id="buddyCatchesBody"></div>
+    </div>
+  </div>
+
+
+  <!-- ════════════════════ FISHING SPOTS PAGE ════════════════════ -->
+  <div class="page" id="page-spots">
+    <div class="nav-bar">
+      <button class="nav-back" onclick="navBack()">
+        <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+        Home
+      </button>
+      <span class="nav-title">📍 Fishing Spots</span>
+    </div>
+    <div class="page-content" id="spotsPageBody"></div>
+  </div>
+
+
+  <!-- ════════════════════ SPOT CATCHES PAGE ════════════════════ -->
+  <div class="page" id="page-spot-catches">
+    <div class="nav-bar">
+      <button class="nav-back" onclick="navBack()">
+        <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+        Spots
+      </button>
+      <span class="nav-title" id="spotCatchesTitle">Catches</span>
+    </div>
+    <div class="page-content">
+      <div class="catch-grid" id="spotCatchesBody"></div>
+    </div>
+  </div>
+
+
+  <!-- ════════════════════ SETTINGS PAGE ════════════════════ -->
+  <div class="page" id="page-settings">
+    <div class="nav-bar">
+      <button class="nav-back" onclick="navBack()">
+        <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+        Home
+      </button>
+      <span class="nav-title">⚙️ Settings</span>
+    </div>
+    <div class="page-content" style="max-width:500px">
+      <div class="settings-section-title">Default State</div>
+      <div class="form-group">
+        <label>Pre-fill this state when logging a new catch</label>
+        <select id="settingsDefaultState"></select>
+      </div>
+      <div class="settings-section-title">Display Name</div>
+      <div class="form-group">
+        <label>Your log's name</label>
+        <input type="text" id="settingsName" placeholder="Austin's Fishing Log" />
+      </div>
+      <div class="settings-section-title" style="margin-top:20px">Catch Log Preview</div>
+      <div class="form-group">
+        <label>How many recent catches to show on the home screen</label>
+        <select id="settingsPageSize">
+          <option value="4">4</option>
+          <option value="8">8</option>
+          <option value="16">16</option>
+          <option value="20">20</option>
+          <option value="9999">Show All</option>
+        </select>
+      </div>
+      <div class="settings-section-title" style="margin-top:20px">Web App URL</div>
+      <div class="form-group">
+        <label>Google Apps Script URL</label>
+        <div class="share-info" id="shareUrlDisplay">—</div>
+        <button class="btn btn-outline btn-sm" onclick="copyShareUrl()" style="margin-top:6px">📋 Copy URL</button>
+      </div>
+      <div class="settings-section-title" style="margin-top:20px">Cross-Device Sync</div>
+      <div class="form-group">
+        <p style="font-size:.82rem;color:#888;line-height:1.5;margin-bottom:10px">Your tackle box, rod rack, favorites, and settings sync automatically to Google Sheets in the background, then load on any device using this same Web App URL.</p>
+        <button class="btn btn-outline btn-sm" onclick="manualSync()">🔄 Sync Now</button>
+        <span id="settingsSyncStatus" style="font-family:'DM Mono',monospace;font-size:.74rem;color:var(--water);margin-left:8px"></span>
+      </div>
+      <div class="form-actions" style="margin-top:8px">
+        <button class="btn btn-primary" onclick="saveSettings()">💾 Save Settings</button>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /page-root -->
+
+<div class="loading-overlay" id="loadingOverlay">
+  <div class="spinner"></div>
+  <span id="loadingMsg">Reeling it in…</span>
+</div>
+<div class="toast" id="toast"></div>
+
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
