@@ -56,14 +56,37 @@ const ls = {
 };
 
 // Map our localStorage keys to the AppData sheet keys
-const SYNC_KEYS = { fl_tackle: 'tackle', fl_rods: 'rods', fl_favs: 'favorites', fl_settings: 'settings' };
+// Keys are namespaced per user so two sites on the same GitHub Pages
+// domain never share localStorage data with each other.
+let _prefix = null;
+function pfx() {
+  if (_prefix) return _prefix;
+  // Derive a short fingerprint from the Web App URL — each person's
+  // Apps Script URL is unique, so their localStorage is isolated.
+  if (CONFIG.WEB_APP_URL) {
+    const match = CONFIG.WEB_APP_URL.match(/\/s\/([^/]+)\//);
+    const uid = match ? match[1].slice(-12) : CONFIG.WEB_APP_URL.slice(-16).replace(/[^a-z0-9]/gi,'');
+    _prefix = 'fl_' + uid + '_';
+  } else {
+    _prefix = 'fl_default_';
+  }
+  return _prefix;
+}
 
 function lsTimestampKey(k) { return k + '_ts'; }
 
-function getSettings() { return ls.get('fl_settings', {}); }
-function getTackle()   { return ls.get('fl_tackle',   []); }
-function getRods()     { return ls.get('fl_rods',     []); }
-function getFavs()     { return ls.get('fl_favs',     []); }
+function getSettings() { return ls.get(pfx()+'settings', {}); }
+function getTackle()   { return ls.get(pfx()+'tackle',   []); }
+function getRods()     { return ls.get(pfx()+'rods',     []); }
+function getFavs()     { return ls.get(pfx()+'favs',     []); }
+
+// Sheet key mapping (sheet keys are short, human-readable)
+const SHEET_KEY_MAP = {
+  get [pfx()+'tackle']()   { return 'tackle'; },
+  get [pfx()+'rods']()     { return 'rods'; },
+  get [pfx()+'favs']()     { return 'favorites'; },
+  get [pfx()+'settings']() { return 'settings'; },
+};
 
 // Generic setter: writes locally + stamps time + queues a Sheets push
 function setSynced(localKey, value) {
@@ -71,10 +94,12 @@ function setSynced(localKey, value) {
   ls.set(lsTimestampKey(localKey), Date.now());
   queueSyncPush(localKey, value);
 }
-function saveTackle(a) { setSynced('fl_tackle', a); }
-function saveRods(a)   { setSynced('fl_rods',   a); }
-function saveFavs(a)   { setSynced('fl_favs',   a); }
-function saveSettingsLocal(obj) { setSynced('fl_settings', obj); }
+function saveTackle(a)         { setSynced(pfx()+'tackle',   a); }
+function saveRods(a)           { setSynced(pfx()+'rods',     a); }
+function saveFavs(a)           { setSynced(pfx()+'favs',     a); }
+function saveSettingsLocal(obj){ setSynced(pfx()+'settings', obj); }
+
+
 
 /* ─── BACKGROUND SYNC ENGINE ─────────────────────────────── */
 let _syncPending = {};
@@ -82,11 +107,9 @@ let _syncTimer   = null;
 
 function queueSyncPush(localKey, value) {
   if (!CONFIG.WEB_APP_URL) return;
-  const sheetKey = SYNC_KEYS[localKey];
+  const sheetKey = { [pfx()+'tackle']:'tackle', [pfx()+'rods']:'rods', [pfx()+'favs']:'favorites', [pfx()+'settings']:'settings' }[localKey];
   if (!sheetKey) return;
   _syncPending[sheetKey] = value;
-  // Debounce — wait 1.2s after the last change before actually pushing,
-  // so rapid edits (like typing) don't spam the network.
   clearTimeout(_syncTimer);
   _syncTimer = setTimeout(flushSyncQueue, 1200);
 }
@@ -120,7 +143,15 @@ async function pullAndMergeAppData() {
     const remote = await resp.json();
     if (remote.error) throw new Error(remote.error);
 
-    Object.entries(SYNC_KEYS).forEach(([localKey, sheetKey]) => {
+    // Map sheet keys back to local namespaced keys
+    const sheetToLocal = {
+      tackle:   pfx()+'tackle',
+      rods:     pfx()+'rods',
+      favorites:pfx()+'favs',
+      settings: pfx()+'settings',
+    };
+
+    Object.entries(sheetToLocal).forEach(([sheetKey, localKey]) => {
       const remoteEntry = remote[sheetKey];
       if (!remoteEntry || remoteEntry.value === null) return;
 
@@ -128,12 +159,10 @@ async function pullAndMergeAppData() {
       const remoteTs = remoteEntry.lastModified || 0;
 
       if (remoteTs > localTs) {
-        // Remote is newer — adopt it locally without re-triggering a push
         ls.set(localKey, remoteEntry.value);
         ls.set(lsTimestampKey(localKey), remoteTs);
       } else if (localTs > remoteTs && localStorage.getItem(localKey) !== null) {
-        // Local is newer — push it up so Sheets catches up
-        queueSyncPush(localKey, ls.get(localKey, SYNC_KEYS[localKey]==='settings'?{}:[]));
+        queueSyncPush(localKey, ls.get(localKey, sheetKey==='settings'?{}:[]));
       }
     });
 
