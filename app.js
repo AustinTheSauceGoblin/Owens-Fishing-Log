@@ -308,6 +308,17 @@ function setDateTimeNow(id) {
   const now = new Date();
   now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
   document.getElementById(id).value = now.toISOString().slice(0,16);
+  // Also set the date-only field
+  const dateOnly = document.getElementById('fDateOnly');
+  if (dateOnly) dateOnly.value = now.toISOString().slice(0,10);
+}
+
+function toggleTimeField() {
+  const noTime   = document.getElementById('fNoTime').checked;
+  const dtField  = document.getElementById('fDate');
+  const doField  = document.getElementById('fDateOnly');
+  dtField.style.display = noTime ? 'none' : '';
+  doField.style.display = noTime ? ''     : 'none';
 }
 
 /* ─── STATE DROPDOWNS ───────────────────────────────────── */
@@ -593,10 +604,13 @@ async function loadCatches() {
 ═══════════════════════════════════════════════════════════ */
 async function submitCatch() {
   const fish   = document.getElementById('fFish').value.trim();
-  const date   = document.getElementById('fDate').value;
+  const noTime = document.getElementById('fNoTime').checked;
+  const date   = noTime
+    ? document.getElementById('fDateOnly').value  // just YYYY-MM-DD
+    : document.getElementById('fDate').value;
   const editId = document.getElementById('fEditId').value;
   if (!fish) { showToast('Fish type is required!','error'); return; }
-  if (!date) { showToast('Date & time is required!','error'); return; }
+  if (!date) { showToast('Date is required!','error'); return; }
   if (!CONFIG.WEB_APP_URL) { showToast('Set your Web App URL in config.js.','error'); return; }
 
   showLoading(editId ? 'Saving changes…' : 'Logging your catch…');
@@ -758,7 +772,17 @@ function getFishEmoji(name) {
 function minsToTimeStr(m) { const h=Math.floor(m/60)%24,mn=Math.round(m%60); return `${h%12||12}:${String(mn).padStart(2,'0')} ${h<12?'AM':'PM'}`; }
 function calcAvgTimes(catches) {
   const am=[],pm=[];
-  catches.forEach(c=>{ if(!c.date) return; const d=new Date(c.date); if(isNaN(d)) return; const m=d.getHours()*60+d.getMinutes(); (d.getHours()<12?am:pm).push(m); });
+  catches.forEach(c=>{
+    if (!c.date) return;
+    // Skip catches with no time — date-only entries come back as midnight UTC
+    // which would corrupt the averages. We detect them by checking if the
+    // stored string is just a date (no T) or ends at exactly midnight.
+    const dateStr = String(c.date);
+    if (!dateStr.includes('T') || dateStr.endsWith('T00:00:00.000Z')) return;
+    const d=new Date(c.date); if(isNaN(d)) return;
+    const m=d.getHours()*60+d.getMinutes();
+    (d.getHours()<12?am:pm).push(m);
+  });
   const avg=a=>a.length?a.reduce((x,y)=>x+y,0)/a.length:null;
   return { amAvg:avg(am), pmAvg:avg(pm), amCount:am.length, pmCount:pm.length };
 }
@@ -903,7 +927,23 @@ function openEditCatch(id) {
   document.getElementById('fTrip').value               = c.trip     || '';
   document.getElementById('fNotes').value              = c.notes    || '';
   document.getElementById('fState').value              = c.state    || '';
-  if (c.date) { try { const d=new Date(c.date); d.setMinutes(d.getMinutes()-d.getTimezoneOffset()); document.getElementById('fDate').value=d.toISOString().slice(0,16); } catch { setDateTimeNow('fDate'); } } else setDateTimeNow('fDate');
+  // Detect if this catch was saved without a time (date-only string has no 'T')
+  const hasTime = c.date && c.date.includes('T') && !c.date.endsWith('T00:00:00.000Z');
+  const noTimeCheck = document.getElementById('fNoTime');
+  noTimeCheck.checked = !hasTime;
+  document.getElementById('fDate').style.display     = hasTime ? '' : 'none';
+  document.getElementById('fDateOnly').style.display = hasTime ? 'none' : '';
+  if (c.date) {
+    try {
+      const d = new Date(c.date);
+      d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+      if (hasTime) {
+        document.getElementById('fDate').value = d.toISOString().slice(0,16);
+      } else {
+        document.getElementById('fDateOnly').value = d.toISOString().slice(0,10);
+      }
+    } catch { setDateTimeNow('fDate'); }
+  } else { setDateTimeNow('fDate'); }
   refreshLureDropdown();
   const matchedLure = getTackle().find(t=>t.name===c.lure);
   document.getElementById('fLure').value = matchedLure ? c.lure : '';
@@ -1015,6 +1055,10 @@ function resetForm() {
   ['fFish','fWeight','fLureCustom','fWith','fLocation','fTrip','fNotes'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('fPhoto').value='';
   document.getElementById('fPhotoPreview').classList.remove('show');
+  // Reset date/time toggle back to full datetime mode
+  document.getElementById('fNoTime').checked = false;
+  document.getElementById('fDate').style.display = '';
+  document.getElementById('fDateOnly').style.display = 'none';
   setDateTimeNow('fDate');
   document.getElementById('fState').value = getSettings().defaultState||'';
   refreshLureDropdown(); refreshRodDropdown();

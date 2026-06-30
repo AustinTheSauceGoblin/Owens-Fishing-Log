@@ -363,7 +363,12 @@
       <div class="form-row">
         <div class="form-group">
           <label>Date &amp; Time *</label>
+          <input type="date" id="fDateOnly" style="display:none" />
           <input type="datetime-local" id="fDate" />
+          <label style="display:flex;align-items:center;gap:6px;margin-top:6px;font-family:'DM Mono',monospace;font-size:.68rem;letter-spacing:.04em;text-transform:none;cursor:pointer;color:#888">
+            <input type="checkbox" id="fNoTime" onchange="toggleTimeField()" style="width:auto;padding:0;border:none;box-shadow:none" />
+            Date only — I don't know the exact time
+          </label>
         </div>
         <div class="form-group">
           <label>Lure / Bait</label>
