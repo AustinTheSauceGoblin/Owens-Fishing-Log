@@ -34,7 +34,7 @@ const FISH_EMOJI = {
 };
 function getCatchPageSize() {
   const v = parseInt(getSettings().pageSize);
-  return Number.isFinite(v) && v > 0 ? v : 6;
+  return Number.isFinite(v) && v > 0 ? v : 8;
 }
 
 /* ─── APP STATE ─────────────────────────────────────────── */
