@@ -7,7 +7,7 @@ const CONFIG = {
 
   // Paste your Google Apps Script Web App URL here.
   // You get this after deploying the script — see SETUP.md step 6.
-  WEB_APP_URL: "https://script.google.com/macros/s/AKfycbzsUnkPvzvW7zIQVhKiF1mDKPaMUX7VRz2qh3R5F-LkJVIKw-G_Oxj_rSfSc_ZFQeat/exec",
+  WEB_APP_URL: "https://script.google.com/macros/s/AKfycbyEwS4iWMmdZL5pd5ss-tfAz7SUK63-kskNUPRmDWEcUDzHtg1DW9bAS3258tKfv7A0FQ/exec",
 
   // Your name or handle — shown at the top of your log.
   OWNER_NAME: "Owen's Fishing Log",
