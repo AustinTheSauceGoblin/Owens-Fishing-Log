@@ -312,7 +312,7 @@
       <div class="stat-card"><div class="stat-label">Biggest Fish</div><div class="stat-value" id="statBiggest">—</div><div class="stat-sub" id="statBiggestFish"></div></div>
       <div class="stat-card"><div class="stat-label">States</div><div class="stat-value" id="statStates">—</div></div>
       <div class="stat-card"><div class="stat-label">Trips</div><div class="stat-value" id="statTrips">—</div></div>
-      <div class="stat-card"><div class="stat-label">Favorites</div><div class="stat-value" id="statFavs">—</div></div>
+
       <div class="stat-card stat-card-clickable" onclick="navTo('page-buddies')"><div class="stat-label">Buddies</div><div class="stat-value" id="statBuddies">—</div><div class="stat-sub">tap →</div></div>
       <div class="stat-card stat-card-clickable" onclick="navTo('page-spots')"><div class="stat-label">Spots</div><div class="stat-value" id="statSpots">—</div><div class="stat-sub">tap →</div></div>
     </div>
@@ -342,7 +342,11 @@
     <div class="state-breakdown" id="stateBreakdown"><div class="spinner"></div></div>
 
     <div class="section-title section-title-heart">❤️ Favorites</div>
-    <div class="catch-grid" id="favGrid" style="margin-bottom:24px"><div class="spinner"></div></div>
+    <div class="catch-grid" id="favGrid" style="margin-bottom:8px"><div class="spinner"></div></div>
+    <div class="catch-log-count" id="favLogCount" style="margin:8px 16px 0"></div>
+    <div class="catch-log-footer" id="favLogFooter" style="display:none">
+      <button class="btn btn-outline" onclick="navTo('page-all-favs')">❤️ View All Favorites</button>
+    </div>
 
     <div class="section-title">Catch Log</div>
     <div class="catch-grid" id="catchGrid"><div class="spinner"></div></div>
@@ -476,6 +480,20 @@
     </div>
     <div class="page-content">
       <div class="catch-grid" id="allCatchesBody"></div>
+    </div>
+  </div>
+
+  <!-- ════════════════════ ALL FAVORITES PAGE ════════════════════ -->
+  <div class="page" id="page-all-favs">
+    <div class="nav-bar">
+      <button class="nav-back" onclick="navBack()">
+        <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+        Home
+      </button>
+      <span class="nav-title" id="allFavsTitle">All Favorites</span>
+    </div>
+    <div class="page-content">
+      <div class="catch-grid" id="allFavsBody"></div>
     </div>
   </div>
 

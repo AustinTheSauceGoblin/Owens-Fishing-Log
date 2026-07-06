@@ -217,6 +217,7 @@ function navTo(pageId) {
   if (pageId === 'page-buddies')     prepBuddiesPage();
   if (pageId === 'page-spots')       prepSpotsPage();
   if (pageId === 'page-all-catches') prepAllCatches();
+  if (pageId === 'page-all-favs')    prepAllFavs();
   if (pageId === 'page-tackle')      renderTackleList();
   if (pageId === 'page-rods')        renderRodList();
   if (pageId === 'page-shops')       { renderShops(); populateShopStateFilter(); }
@@ -369,15 +370,35 @@ function toggleFav(id, e) {
 }
 
 function renderFavs() {
-  const el   = document.getElementById('favGrid');
-  const favs = getFavs();
+  const el     = document.getElementById('favGrid');
+  const footer = document.getElementById('favLogFooter');
+  const count  = document.getElementById('favLogCount');
+  const favs   = getFavs();
   const favCatches = allCatches.filter(c => favs.includes(String(c.id)));
+
   if (!favCatches.length) {
     el.innerHTML = `<div class="empty-state"><div class="fish-big">🤍</div><h3>No favorites yet</h3><p>Tap the ♡ on any catch to add it here.</p></div>`;
+    if (footer) footer.style.display = 'none';
+    if (count)  count.textContent = '';
     return;
   }
-  const sorted = [...favCatches].sort((a,b) => new Date(b.date)-new Date(a.date));
-  el.innerHTML = sorted.map((c,i) => buildCatchCard(c,i,true)).join('');
+
+  const sorted   = [...favCatches].sort((a,b) => new Date(b.date)-new Date(a.date));
+  const pageSize = getCatchPageSize();
+  el.innerHTML   = sorted.slice(0, pageSize).map((c,i) => buildCatchCard(c,i,true)).join('');
+
+  if (footer) footer.style.display = sorted.length > pageSize ? 'flex' : 'none';
+  if (count)  count.textContent    = sorted.length > pageSize
+    ? `Showing ${pageSize} of ${sorted.length} favorites`
+    : `${sorted.length} favorite${sorted.length !== 1 ? 's' : ''}`;
+}
+
+function prepAllFavs() {
+  const favs       = getFavs();
+  const favCatches = allCatches.filter(c => favs.includes(String(c.id)));
+  const sorted     = [...favCatches].sort((a,b) => new Date(b.date)-new Date(a.date));
+  document.getElementById('allFavsTitle').textContent = `All Favorites (${sorted.length})`;
+  document.getElementById('allFavsBody').innerHTML = sorted.map((c,i) => buildCatchCard(c,i,true)).join('');
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -750,7 +771,6 @@ function renderStats(catches) {
   document.getElementById('statSpecies').textContent = new Set(catches.map(c=>c.fish).filter(Boolean)).size;
   document.getElementById('statTrips').textContent   = new Set(catches.map(c=>c.trip).filter(Boolean)).size;
   document.getElementById('statStates').textContent  = new Set(catches.map(c=>c.state).filter(Boolean)).size;
-  document.getElementById('statFavs').textContent    = getFavs().length;
 
   const buddySet = new Set();
   allCatches.forEach(c => { if (c.fishWith) c.fishWith.split(',').forEach(b => { const t=b.trim(); if(t) buddySet.add(t); }); });
@@ -770,7 +790,7 @@ function renderStats(catches) {
   }
 }
 function renderEmptyStats() {
-  ['statTotal','statSpecies','statBiggest','statTrips','statStates','statFavs','statBuddies','statSpots'].forEach(id => document.getElementById(id).textContent='—');
+  ['statTotal','statSpecies','statBiggest','statTrips','statStates','statBuddies','statSpots'].forEach(id => document.getElementById(id).textContent='—');
 }
 
 /* ─── SPECIES BREAKDOWN ─────────────────────────────────── */
