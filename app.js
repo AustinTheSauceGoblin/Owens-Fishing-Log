@@ -86,6 +86,7 @@ const SHEET_KEY_MAP = {
   get [pfx()+'rods']()     { return 'rods'; },
   get [pfx()+'favs']()     { return 'favorites'; },
   get [pfx()+'settings']() { return 'settings'; },
+  get [pfx()+'crops']()    { return 'crops'; },
 };
 
 // Generic setter: writes locally + stamps time + queues a Sheets push
@@ -107,7 +108,7 @@ let _syncTimer   = null;
 
 function queueSyncPush(localKey, value) {
   if (!CONFIG.WEB_APP_URL) return;
-  const sheetKey = { [pfx()+'tackle']:'tackle', [pfx()+'rods']:'rods', [pfx()+'favs']:'favorites', [pfx()+'settings']:'settings' }[localKey];
+  const sheetKey = { [pfx()+'tackle']:'tackle', [pfx()+'rods']:'rods', [pfx()+'favs']:'favorites', [pfx()+'settings']:'settings', [pfx()+'crops']:'crops' }[localKey];
   if (!sheetKey) return;
   _syncPending[sheetKey] = value;
   clearTimeout(_syncTimer);
@@ -145,10 +146,11 @@ async function pullAndMergeAppData() {
 
     // Map sheet keys back to local namespaced keys
     const sheetToLocal = {
-      tackle:   pfx()+'tackle',
-      rods:     pfx()+'rods',
-      favorites:pfx()+'favs',
-      settings: pfx()+'settings',
+      tackle:    pfx()+'tackle',
+      rods:      pfx()+'rods',
+      favorites: pfx()+'favs',
+      settings:  pfx()+'settings',
+      crops:     pfx()+'crops',
     };
 
     Object.entries(sheetToLocal).forEach(([sheetKey, localKey]) => {
@@ -217,6 +219,9 @@ function navTo(pageId) {
   if (pageId === 'page-all-catches') prepAllCatches();
   if (pageId === 'page-tackle')      renderTackleList();
   if (pageId === 'page-rods')        renderRodList();
+  if (pageId === 'page-shops')       { renderShops(); populateShopStateFilter(); }
+  if (pageId === 'page-shop-add' && !_skipShopReset) resetShopForm();
+  _skipShopReset = false;
   if (pageId === 'page-log' && !_skipLogReset) {
     document.getElementById('logPageTitle').textContent = 'Log a Catch';
     document.getElementById('logSaveBtn').textContent   = '🎣 Save Catch';
@@ -296,6 +301,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   refreshRodDropdown();
 
   loadCatches();
+  loadShops();
 });
 
 function applyOwnerName() {
@@ -324,7 +330,7 @@ function toggleTimeField() {
 /* ─── STATE DROPDOWNS ───────────────────────────────────── */
 function populateStateDropdowns() {
   const def = getSettings().defaultState || '';
-  ['fState','settingsDefaultState'].forEach(id => {
+  ['fState','settingsDefaultState','sState'].forEach(id => {
     const sel = document.getElementById(id);
     if (!sel) return;
     sel.innerHTML = id === 'settingsDefaultState'
@@ -333,7 +339,7 @@ function populateStateDropdowns() {
     US_STATES.forEach(s => {
       const o = document.createElement('option');
       o.value = s; o.textContent = s;
-      if (s === def) o.selected = true;
+      if (id === 'fState' && s === def) o.selected = true;
       sel.appendChild(o);
     });
   });
@@ -634,12 +640,16 @@ async function submitCatch() {
     notes:         document.getElementById('fNotes').value.trim(),
     photo:         photoB64,
     existingPhoto: document.getElementById('fExistingPhoto').value,
+    cropPos:       document.getElementById('fCropPos').value || 'center center',
   };
 
   try {
     const resp = await fetch(CONFIG.WEB_APP_URL, { method:'POST', body: JSON.stringify(payload) });
     const data = await resp.json();
     if (data.error) throw new Error(data.error);
+    // Save crop position locally (keyed by ID returned from server, or editId)
+    const savedId = data.id || editId;
+    if (savedId) setCropPos(savedId, payload.cropPos);
     showToast(editId ? '✏️ Catch updated!' : '🎣 Catch logged!','success');
     navBack();
     resetForm();
@@ -822,11 +832,22 @@ function renderStateBreakdown(catches) {
 }
 
 /* ─── BUILD CATCH CARD ───────────────────────────────────── */
+// Crop positions stored locally by ID (display preference, no need for sheet column)
+// Crop positions stored as one synced dict: { id: "top center", ... }
+function getCropDict()    { return ls.get(pfx()+'crops', {}); }
+function getCropPos(id)   { return getCropDict()[id] || 'center center'; }
+function setCropPos(id, pos) {
+  const dict = getCropDict();
+  dict[id] = pos;
+  setSynced(pfx()+'crops', dict);
+}
+
 function buildCatchCard(c, i, isFavCard) {
   const dt = c.date ? new Date(c.date).toLocaleString(undefined,{month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'}) : '';
-  const faved = isFav(c.id);
+  const faved   = isFav(c.id);
+  const cropPos = getCropPos(c.id);
   const photoHtml = c.photoUrl && c.photoUrl.trim()
-    ? `<img class="catch-photo" src="${esc(c.photoUrl)}" alt="${esc(c.fish)}" loading="lazy" referrerpolicy="no-referrer" />`
+    ? `<img class="catch-photo" src="${esc(c.photoUrl)}" alt="${esc(c.fish)}" loading="lazy" referrerpolicy="no-referrer" style="object-position:${cropPos}" />`
     : `<div class="catch-photo-placeholder">${getFishEmoji(c.fish)}</div>`;
   const tags = [c.trip,c.state].filter(Boolean);
   return `<div class="catch-card${isFavCard?' fav-card':''}" style="animation-delay:${Math.min(i,8)*40}ms">
@@ -951,7 +972,20 @@ function openEditCatch(id) {
   refreshRodDropdown();
   document.getElementById('fRod').value = c.rod || '';
   const prev = document.getElementById('fPhotoPreview');
-  if (c.photoUrl&&c.photoUrl.trim()) { prev.src=c.photoUrl; prev.classList.add('show'); } else prev.classList.remove('show');
+  if (c.photoUrl && c.photoUrl.trim()) {
+    prev.src = c.photoUrl;
+    prev.classList.add('show');
+    // Restore saved crop position
+    const savedCrop = c.cropPos || 'center center';
+    document.getElementById('fCropPos').value = savedCrop;
+    prev.style.objectPosition = savedCrop;
+    document.getElementById('fCropControl').classList.add('show');
+    buildCropGrid('fCropGrid','fCropPos','fPhotoPreview');
+  } else {
+    prev.classList.remove('show');
+    document.getElementById('fCropControl').classList.remove('show');
+    document.getElementById('fCropPos').value = 'center center';
+  }
   document.getElementById('fPhoto').value='';
   _skipLogReset = true;
   navTo('page-log');
@@ -1055,6 +1089,8 @@ function resetForm() {
   ['fFish','fWeight','fLureCustom','fWith','fLocation','fTrip','fNotes'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('fPhoto').value='';
   document.getElementById('fPhotoPreview').classList.remove('show');
+  document.getElementById('fCropControl').classList.remove('show');
+  document.getElementById('fCropPos').value = 'center center';
   // Reset date/time toggle back to full datetime mode
   document.getElementById('fNoTime').checked = false;
   document.getElementById('fDate').style.display = '';
@@ -1064,11 +1100,73 @@ function resetForm() {
   refreshLureDropdown(); refreshRodDropdown();
 }
 
+/* ─── CROP POSITION CONTROL ──────────────────────────────── */
+const CROP_POSITIONS = [
+  { label:'↖', pos:'top left' },    { label:'↑', pos:'top center' },    { label:'↗', pos:'top right' },
+  { label:'←', pos:'center left' }, { label:'·', pos:'center center' }, { label:'→', pos:'center right' },
+  { label:'↙', pos:'bottom left' }, { label:'↓', pos:'bottom center' }, { label:'↘', pos:'bottom right' },
+];
+
+function buildCropGrid(gridId, hiddenId, previewId) {
+  const grid    = document.getElementById(gridId);
+  const hidden  = document.getElementById(hiddenId);
+  const preview = document.getElementById(previewId);
+  if (!grid) return;
+  const current = hidden ? hidden.value || 'center center' : 'center center';
+  grid.innerHTML = CROP_POSITIONS.map(({label, pos}) =>
+    `<button type="button" class="crop-btn${pos===current?' active':''}"
+      onclick="setCrop('${gridId}','${hiddenId}','${previewId}','${pos}')">${label}</button>`
+  ).join('');
+  if (preview) preview.style.objectPosition = current;
+}
+
+function setCrop(gridId, hiddenId, previewId, pos) {
+  const hidden  = document.getElementById(hiddenId);
+  const preview = document.getElementById(previewId);
+  if (hidden)  hidden.value = pos;
+  if (preview) preview.style.objectPosition = pos;
+  // Update active button
+  document.querySelectorAll(`#${gridId} .crop-btn`).forEach(btn => {
+    btn.classList.toggle('active', btn.textContent === CROP_POSITIONS.find(p=>p.pos===pos)?.label);
+  });
+}
+
 function previewPhoto() {
-  const file=document.getElementById('fPhoto').files[0];
-  const img=document.getElementById('fPhotoPreview');
-  if(file){ const r=new FileReader(); r.onload=e=>{img.src=e.target.result;img.classList.add('show');}; r.readAsDataURL(file); }
-  else img.classList.remove('show');
+  const file    = document.getElementById('fPhoto').files[0];
+  const img     = document.getElementById('fPhotoPreview');
+  const control = document.getElementById('fCropControl');
+  if (file) {
+    const r = new FileReader();
+    r.onload = e => {
+      img.src = e.target.result;
+      img.classList.add('show');
+      control.classList.add('show');
+      buildCropGrid('fCropGrid','fCropPos','fPhotoPreview');
+    };
+    r.readAsDataURL(file);
+  } else {
+    img.classList.remove('show');
+    control.classList.remove('show');
+  }
+}
+
+function previewShopPhoto() {
+  const file    = document.getElementById('sPhoto').files[0];
+  const img     = document.getElementById('sPhotoPreview');
+  const control = document.getElementById('sCropControl');
+  if (file) {
+    const r = new FileReader();
+    r.onload = e => {
+      img.src = e.target.result;
+      img.classList.add('show');
+      control.classList.add('show');
+      buildCropGrid('sCropGrid','sCropPos','sPhotoPreview');
+    };
+    r.readAsDataURL(file);
+  } else {
+    img.classList.remove('show');
+    control.classList.remove('show');
+  }
 }
 
 /* ─── IMAGE UTILS ────────────────────────────────────────── */
@@ -1082,6 +1180,210 @@ let toastTimer;
 function showToast(msg,type='') { const el=document.getElementById('toast'); el.textContent=msg; el.className='toast show'+(type?' '+type:''); clearTimeout(toastTimer); toastTimer=setTimeout(()=>el.classList.remove('show'),3500); }
 function showLoading(msg='Loading…') { document.getElementById('loadingMsg').textContent=msg; document.getElementById('loadingOverlay').classList.add('active'); }
 function hideLoading() { document.getElementById('loadingOverlay').classList.remove('active'); }
+
+/* ═══════════════════════════════════════════════════════════
+   FISH SHOPS
+═══════════════════════════════════════════════════════════ */
+
+let allShops      = [];
+let _skipShopReset = false;
+
+const SHOP_TYPES = ['Fly Fishing','Ocean Fishing','Bass Fishing','All'];
+const SHOP_TYPE_EMOJI = {
+  'Fly Fishing':   '🪰',
+  'Ocean Fishing': '🌊',
+  'Bass Fishing':  '🐟',
+  'All':           '🎣',
+};
+
+async function loadShops() {
+  if (!CONFIG.WEB_APP_URL) return;
+  try {
+    const resp = await fetch(`${CONFIG.WEB_APP_URL}?action=getShops`);
+    const data = await resp.json();
+    if (data.error) throw new Error(data.error);
+    allShops = data.shops || [];
+    renderShops();
+    populateShopStateFilter();
+  } catch(err) {
+    console.error('Shops load error:', err);
+  }
+}
+
+function populateShopStateFilter() {
+  const sel = document.getElementById('shopFilterState');
+  if (!sel) return;
+  const current = sel.value;
+  const states  = [...new Set(allShops.map(s=>s.state).filter(Boolean))].sort();
+  sel.innerHTML = '<option value="">All States</option>';
+  states.forEach(s => sel.insertAdjacentHTML('beforeend',`<option value="${esc(s)}">${esc(s)}</option>`));
+  sel.value = current;
+}
+
+function renderShops() {
+  const el         = document.getElementById('shopGrid');
+  if (!el) return;
+  const stateVal   = (document.getElementById('shopFilterState')||{}).value || '';
+  const typeVal    = (document.getElementById('shopFilterType')||{}).value  || '';
+
+  const filtered   = allShops.filter(s => {
+    if (stateVal && s.state    !== stateVal) return false;
+    if (typeVal  && s.shopType !== typeVal)  return false;
+    return true;
+  });
+
+  if (!filtered.length) {
+    el.innerHTML = `<div class="empty-state" style="grid-column:1/-1"><div class="fish-big">🏪</div><h3>No shops yet</h3><p>Tap "+ Add Shop" to add your first fish shop.</p></div>`;
+    return;
+  }
+
+  el.innerHTML = filtered.map((s,i) => {
+    const cropPos   = getCropPos(s.id);
+    const photoHtml = s.photoUrl && s.photoUrl.trim()
+      ? `<img class="shop-photo" src="${esc(s.photoUrl)}" alt="${esc(s.name)}" loading="lazy" referrerpolicy="no-referrer" style="object-position:${cropPos}" />`
+      : `<div class="shop-photo-placeholder">${SHOP_TYPE_EMOJI[s.shopType]||'🏪'}</div>`;
+    const location = [s.city, s.state].filter(Boolean).join(', ');
+    return `<div class="shop-card" style="animation-delay:${Math.min(i,8)*40}ms" onclick="openShopDetail('${esc(s.id)}')">
+      ${photoHtml}
+      <div class="shop-body">
+        <div class="shop-name">${esc(s.name)}</div>
+        ${location ? `<div class="shop-location">📍 ${esc(location)}</div>` : ''}
+        ${s.shopType ? `<span class="shop-type-badge">${SHOP_TYPE_EMOJI[s.shopType]||''} ${esc(s.shopType)}</span>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function openShopDetail(id) {
+  const s = allShops.find(x => x.id === id);
+  if (!s) return;
+  const photoHtml = s.photoUrl && s.photoUrl.trim()
+    ? `<img class="shop-detail-photo" src="${esc(s.photoUrl)}" alt="${esc(s.name)}" referrerpolicy="no-referrer" />`
+    : `<div class="shop-detail-placeholder">${SHOP_TYPE_EMOJI[s.shopType]||'🏪'}</div>`;
+  const location = [s.city, s.state].filter(Boolean).join(', ');
+  const fields = [
+    { label:'Shop Type', value: s.shopType ? `${SHOP_TYPE_EMOJI[s.shopType]||''} ${s.shopType}` : '—' },
+    { label:'City',      value: s.city    || '—' },
+    { label:'State',     value: s.state   || '—' },
+    { label:'Address',   value: s.address || '—' },
+  ];
+  document.getElementById('shopDetailBody').innerHTML = `
+    ${photoHtml}
+    <div class="page-content">
+      <div class="detail-fish-name">${esc(s.name)}</div>
+      ${location ? `<div style="font-family:'DM Mono',monospace;font-size:.75rem;color:var(--water);margin-bottom:14px">📍 ${esc(location)}</div>` : ''}
+      <div class="detail-grid">
+        ${fields.map(f=>`<div class="detail-item"><div class="detail-item-label">${f.label}</div><div class="detail-item-value">${esc(f.value)}</div></div>`).join('')}
+      </div>
+      ${s.notes ? `<div class="detail-notes"><div class="detail-item-label" style="margin-bottom:5px">Notes</div>${esc(s.notes)}</div>` : ''}
+      <div class="detail-actions">
+        <button class="btn btn-outline" onclick="openEditShop('${esc(s.id)}')">✏️ Edit</button>
+        <button class="btn btn-danger" onclick="deleteShop('${esc(s.id)}')">🗑 Delete</button>
+      </div>
+    </div>`;
+  navTo('page-shop-detail');
+}
+
+function openEditShop(id) {
+  const s = allShops.find(x => x.id === id);
+  if (!s) return;
+  document.getElementById('shopFormTitle').textContent = 'Edit Shop';
+  document.getElementById('shopSaveBtn').textContent   = '💾 Save Changes';
+  document.getElementById('sEditId').value       = s.id;
+  document.getElementById('sExistingPhoto').value = s.photoUrl || '';
+  document.getElementById('sName').value    = s.name    || '';
+  document.getElementById('sCity').value    = s.city    || '';
+  document.getElementById('sAddress').value = s.address || '';
+  document.getElementById('sNotes').value   = s.notes   || '';
+  document.getElementById('sState').value   = s.state   || '';
+  document.getElementById('sShopType').value = s.shopType || '';
+  const prev = document.getElementById('sPhotoPreview');
+  if (s.photoUrl && s.photoUrl.trim()) {
+    prev.src = s.photoUrl;
+    prev.classList.add('show');
+    const savedCrop = s.cropPos || 'center center';
+    document.getElementById('sCropPos').value = savedCrop;
+    prev.style.objectPosition = savedCrop;
+    document.getElementById('sCropControl').classList.add('show');
+    buildCropGrid('sCropGrid','sCropPos','sPhotoPreview');
+  } else {
+    prev.classList.remove('show');
+    document.getElementById('sCropControl').classList.remove('show');
+    document.getElementById('sCropPos').value = 'center center';
+  }
+  document.getElementById('sPhoto').value = '';
+  _skipShopReset = true;
+  navTo('page-shop-add');
+}
+
+async function submitShop() {
+  const name = document.getElementById('sName').value.trim();
+  const city  = document.getElementById('sCity').value.trim();
+  const editId = document.getElementById('sEditId').value;
+  if (!name) { showToast('Shop name is required!','error'); return; }
+  if (!city)  { showToast('City is required!','error'); return; }
+  if (!CONFIG.WEB_APP_URL) { showToast('Set your Web App URL in config.js.','error'); return; }
+  showLoading(editId ? 'Saving shop…' : 'Adding shop…');
+
+  let photoB64 = '';
+  const photoFile = document.getElementById('sPhoto').files[0];
+  if (photoFile) { photoB64 = await fileToBase64(photoFile); photoB64 = await resizeImage(photoB64, 900); }
+
+  const payload = {
+    action:        editId ? 'editShop' : 'addShop',
+    id:            editId || undefined,
+    name,
+    city,
+    address:       document.getElementById('sAddress').value.trim(),
+    state:         document.getElementById('sState').value,
+    shopType:      document.getElementById('sShopType').value,
+    notes:         document.getElementById('sNotes').value.trim(),
+    photo:         photoB64,
+    existingPhoto: document.getElementById('sExistingPhoto').value,
+    cropPos:       document.getElementById('sCropPos').value || 'center center',
+  };
+
+  try {
+    const resp = await fetch(CONFIG.WEB_APP_URL, { method:'POST', body: JSON.stringify(payload) });
+    const data = await resp.json();
+    if (data.error) throw new Error(data.error);
+    const savedId = data.id || editId;
+    if (savedId) setCropPos(savedId, payload.cropPos);
+    showToast(editId ? '✏️ Shop updated!' : '🏪 Shop added!','success');
+    navBack();
+    await loadShops();
+  } catch(err) {
+    console.error(err); showToast('Failed to save: '+err.message,'error');
+  } finally { hideLoading(); }
+}
+
+async function deleteShop(id) {
+  if (!confirm('Delete this shop? Cannot be undone.')) return;
+  showLoading('Deleting…');
+  try {
+    const resp = await fetch(CONFIG.WEB_APP_URL, { method:'POST', body: JSON.stringify({ action:'deleteShop', id }) });
+    const data = await resp.json();
+    if (data.error) throw new Error(data.error);
+    showToast('Shop deleted.','success');
+    navBack();
+    await loadShops();
+  } catch(err) { showToast('Delete failed: '+err.message,'error'); }
+  finally { hideLoading(); }
+}
+
+function resetShopForm() {
+  document.getElementById('shopFormTitle').textContent = 'Add Fish Shop';
+  document.getElementById('shopSaveBtn').textContent   = '🏪 Save Shop';
+  document.getElementById('sEditId').value        = '';
+  document.getElementById('sExistingPhoto').value = '';
+  document.getElementById('sCropPos').value        = 'center center';
+  ['sName','sCity','sAddress','sNotes'].forEach(id => document.getElementById(id).value='');
+  document.getElementById('sState').value    = '';
+  document.getElementById('sShopType').value = '';
+  document.getElementById('sPhoto').value    = '';
+  document.getElementById('sPhotoPreview').classList.remove('show');
+  document.getElementById('sCropControl').classList.remove('show');
+}
 
 /* ─── UTILS ──────────────────────────────────────────────── */
 function esc(str) { if(str==null) return ''; return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }

@@ -193,8 +193,15 @@
     .form-group input, .form-group select, .form-group textarea { width: 100%; padding: 10px 13px; border-radius: 8px; border: 1.5px solid #ddd; font-family: 'DM Sans', sans-serif; font-size: .9rem; background: #fff; color: var(--ink); outline: none; transition: border-color .18s; }
     .form-group input:focus, .form-group select:focus, .form-group textarea:focus { border-color: var(--water); box-shadow: 0 0 0 3px rgba(44,110,138,.1); }
     .form-group textarea { min-height: 72px; resize: vertical; }
-    .photo-preview { width: 100%; max-height: 200px; object-fit: cover; border-radius: 8px; margin-top: 8px; display: none; border: 1.5px solid #ddd; }
+    .photo-preview { width: 100%; aspect-ratio: 1/1; object-fit: cover; object-position: center; border-radius: 8px; margin-top: 8px; display: none; border: 1.5px solid #ddd; }
     .photo-preview.show { display: block; }
+    .crop-control { display: none; margin-top: 8px; }
+    .crop-control.show { display: block; }
+    .crop-label { font-family: 'DM Mono', monospace; font-size: .66rem; letter-spacing: .06em; text-transform: uppercase; color: var(--water-dk); margin-bottom: 6px; }
+    .crop-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 4px; max-width: 160px; }
+    .crop-btn { background: var(--parchment); border: 1.5px solid var(--line); border-radius: 6px; padding: 6px; cursor: pointer; font-size: .75rem; text-align: center; transition: all .15s; }
+    .crop-btn:hover { border-color: var(--water); background: rgba(44,110,138,.08); }
+    .crop-btn.active { background: var(--water); color: #fff; border-color: var(--water); }
     .form-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px; flex-wrap: wrap; }
 
     /* ── GEAR PAGES ── */
@@ -226,6 +233,22 @@
     .gear-edit-form.show { display: flex; }
     .gear-edit-form input { font-family: 'DM Sans', sans-serif; font-size: .9rem; padding: 10px 12px; border-radius: 8px; border: 1.5px solid #ddd; background: #fff; color: var(--ink); outline: none; }
     .gear-edit-form input:focus { border-color: var(--water); }
+
+    /* ── SHOP CARDS ── */
+    .shop-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(260px,1fr)); gap: 16px; }
+    .shop-card { background: #fff; border-radius: var(--r); border: 1px solid var(--line); box-shadow: var(--shadow); overflow: hidden; cursor: pointer; transition: transform .2s, box-shadow .2s; animation: fadeUp .3s ease both; }
+    .shop-card:hover { transform: translateY(-3px); box-shadow: 0 8px 28px rgba(26,26,20,.16); }
+    .shop-photo { width: 100%; aspect-ratio: 1/1; object-fit: cover; object-position: center; display: block; background: #d8eaf2; }
+    .shop-photo-placeholder { width: 100%; aspect-ratio: 1/1; background: linear-gradient(135deg,#fff3e0,#ffe0b2); display: flex; align-items: center; justify-content: center; font-size: 3rem; }
+    .shop-body { padding: 12px 14px 14px; }
+    .shop-name { font-family: 'Playfair Display', serif; font-size: 1.1rem; font-weight: 700; }
+    .shop-location { font-family: 'DM Mono', monospace; font-size: .7rem; color: var(--water); margin-top: 4px; }
+    .shop-type-badge { display: inline-block; margin-top: 8px; font-family: 'DM Mono', monospace; font-size: .62rem; padding: 3px 9px; border-radius: 20px; background: var(--parchment); color: var(--water-dk); border: 1px solid rgba(44,110,138,.2); }
+    .shop-filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+    .shop-filters select { font-family: 'DM Sans', sans-serif; font-size: .84rem; padding: 7px 11px; border-radius: 6px; border: 1.5px solid var(--line); background: #fff; color: var(--ink); outline: none; }
+    .shop-filters select:focus { border-color: var(--water); }
+    .shop-detail-photo { width: 100%; height: auto; max-height: 70vh; object-fit: contain; display: block; background: #111; }
+    .shop-detail-placeholder { width: 100%; height: 200px; background: linear-gradient(135deg,#fff3e0,#ffe0b2); display: flex; align-items: center; justify-content: center; font-size: 4rem; }
 
     /* ── SETTINGS PAGE ── */
     .settings-section-title { font-family: 'DM Mono', monospace; font-size: .68rem; letter-spacing: .12em; text-transform: uppercase; color: var(--water); border-bottom: 1px solid var(--line); padding-bottom: 8px; margin-bottom: 14px; margin-top: 8px; }
@@ -270,6 +293,7 @@
         <button class="btn btn-white" onclick="navTo('page-log')">+ Log a Catch</button>
         <button class="btn btn-ghost" onclick="navTo('page-tackle')">🧰 Tackle Box</button>
         <button class="btn btn-ghost" onclick="navTo('page-rods')">🎣 Rod Rack</button>
+        <button class="btn btn-ghost" onclick="navTo('page-shops')">🏪 Fish Shops</button>
         <button class="btn btn-ghost" onclick="navTo('page-settings')">⚙️ Settings</button>
       </div>
     </div>
@@ -342,6 +366,7 @@
     <div class="form-wrap">
       <input type="hidden" id="fEditId" />
       <input type="hidden" id="fExistingPhoto" />
+      <input type="hidden" id="fCropPos" value="center center" />
       <div class="form-row">
         <div class="form-group">
           <label>Fish Type *</label>
@@ -414,6 +439,10 @@
         <label>Photo <small style="font-weight:300;text-transform:none;letter-spacing:0;font-family:'DM Sans',sans-serif">(editing: leave blank to keep existing)</small></label>
         <input type="file" id="fPhoto" accept="image/*" onchange="previewPhoto()" />
         <img id="fPhotoPreview" class="photo-preview" alt="Preview" />
+        <div class="crop-control" id="fCropControl">
+          <div class="crop-label">Crop position</div>
+          <div class="crop-grid" id="fCropGrid"></div>
+        </div>
       </div>
       <div class="form-actions">
         <button class="btn btn-outline" onclick="navBack()">Cancel</button>
@@ -565,6 +594,105 @@
       </div>
       <div class="detail-actions" id="rodDetailActions" style="margin-top:16px"></div>
     </div>
+  </div>
+
+
+  <!-- ════════════════════ FISH SHOPS PAGE ════════════════════ -->
+  <div class="page" id="page-shops">
+    <div class="nav-bar">
+      <button class="nav-back" onclick="navBack()">
+        <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+        Home
+      </button>
+      <span class="nav-title">🏪 Fish Shops</span>
+      <button class="btn btn-primary btn-sm nav-action" onclick="navTo('page-shop-add')">+ Add Shop</button>
+    </div>
+    <div class="page-content">
+      <div class="shop-filters">
+        <select id="shopFilterState" onchange="renderShops()"><option value="">All States</option></select>
+        <select id="shopFilterType" onchange="renderShops()">
+          <option value="">All Types</option>
+          <option value="Fly Fishing">Fly Fishing</option>
+          <option value="Ocean Fishing">Ocean Fishing</option>
+          <option value="Bass Fishing">Bass Fishing</option>
+          <option value="All">All</option>
+        </select>
+      </div>
+      <div class="shop-grid" id="shopGrid"><div class="spinner"></div></div>
+    </div>
+  </div>
+
+  <!-- ════════════════════ ADD / EDIT SHOP PAGE ════════════════════ -->
+  <div class="page" id="page-shop-add">
+    <div class="nav-bar">
+      <button class="nav-back" onclick="navBack()">
+        <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+        Fish Shops
+      </button>
+      <span class="nav-title" id="shopFormTitle">Add Fish Shop</span>
+    </div>
+    <div class="form-wrap">
+      <input type="hidden" id="sEditId" />
+      <input type="hidden" id="sExistingPhoto" />
+      <input type="hidden" id="sCropPos" value="center center" />
+      <div class="form-group">
+        <label>Shop Name *</label>
+        <input type="text" id="sName" placeholder="Bob's Bait &amp; Tackle" />
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>City *</label>
+          <input type="text" id="sCity" placeholder="Orlando" />
+        </div>
+        <div class="form-group">
+          <label>State</label>
+          <select id="sState"></select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Address</label>
+        <input type="text" id="sAddress" placeholder="123 Main St" />
+      </div>
+      <div class="form-group">
+        <label>Shop Type</label>
+        <select id="sShopType">
+          <option value="">— Select Type —</option>
+          <option value="Fly Fishing">Fly Fishing</option>
+          <option value="Ocean Fishing">Ocean Fishing</option>
+          <option value="Bass Fishing">Bass Fishing</option>
+          <option value="All">All</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Notes</label>
+        <textarea id="sNotes" placeholder="Hours, specialties, anything useful…"></textarea>
+      </div>
+      <div class="form-group">
+        <label>Photo <small style="font-weight:300;text-transform:none;letter-spacing:0;font-family:'DM Sans',sans-serif">(editing: leave blank to keep existing)</small></label>
+        <input type="file" id="sPhoto" accept="image/*" onchange="previewShopPhoto()" />
+        <img id="sPhotoPreview" class="photo-preview" alt="Preview" />
+        <div class="crop-control" id="sCropControl">
+          <div class="crop-label">Crop position</div>
+          <div class="crop-grid" id="sCropGrid"></div>
+        </div>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-outline" onclick="navBack()">Cancel</button>
+        <button class="btn btn-primary" id="shopSaveBtn" onclick="submitShop()">🏪 Save Shop</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════ SHOP DETAIL PAGE ════════════════════ -->
+  <div class="page" id="page-shop-detail">
+    <div class="nav-bar">
+      <button class="nav-back" onclick="navBack()">
+        <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+        Fish Shops
+      </button>
+      <span class="nav-title">Shop Details</span>
+    </div>
+    <div id="shopDetailBody"></div>
   </div>
 
 
