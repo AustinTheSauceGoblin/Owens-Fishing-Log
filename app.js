@@ -78,13 +78,15 @@ function lsTimestampKey(k) { return k + '_ts'; }
 function getSettings() { return ls.get(pfx()+'settings', {}); }
 function getTackle()   { return ls.get(pfx()+'tackle',   []); }
 function getRods()     { return ls.get(pfx()+'rods',     []); }
-function getFavs()     { return ls.get(pfx()+'favs',     []); }
+function getFavs()       { return ls.get(pfx()+'favs',       []); }
+function getPinnedFavs() { return ls.get(pfx()+'pinnedfavs', null); } // null = not customised yet
 
 // Sheet key mapping (sheet keys are short, human-readable)
 const SHEET_KEY_MAP = {
   get [pfx()+'tackle']()   { return 'tackle'; },
   get [pfx()+'rods']()     { return 'rods'; },
-  get [pfx()+'favs']()     { return 'favorites'; },
+  get [pfx()+'favs']()        { return 'favorites'; },
+  get [pfx()+'pinnedfavs']()  { return 'pinnedfavs'; },
   get [pfx()+'settings']() { return 'settings'; },
   get [pfx()+'crops']()    { return 'crops'; },
 };
@@ -97,7 +99,8 @@ function setSynced(localKey, value) {
 }
 function saveTackle(a)         { setSynced(pfx()+'tackle',   a); }
 function saveRods(a)           { setSynced(pfx()+'rods',     a); }
-function saveFavs(a)           { setSynced(pfx()+'favs',     a); }
+function saveFavs(a)           { setSynced(pfx()+'favs',       a); }
+function savePinnedFavsLS(arr) { setSynced(pfx()+'pinnedfavs', arr); }
 function saveSettingsLocal(obj){ setSynced(pfx()+'settings', obj); }
 
 
@@ -108,7 +111,7 @@ let _syncTimer   = null;
 
 function queueSyncPush(localKey, value) {
   if (!CONFIG.WEB_APP_URL) return;
-  const sheetKey = { [pfx()+'tackle']:'tackle', [pfx()+'rods']:'rods', [pfx()+'favs']:'favorites', [pfx()+'settings']:'settings', [pfx()+'crops']:'crops' }[localKey];
+  const sheetKey = { [pfx()+'tackle']:'tackle', [pfx()+'rods']:'rods', [pfx()+'favs']:'favorites', [pfx()+'pinnedfavs']:'pinnedfavs', [pfx()+'settings']:'settings', [pfx()+'crops']:'crops', [pfx()+'lostlures']:'lostlures' }[localKey];
   if (!sheetKey) return;
   _syncPending[sheetKey] = value;
   clearTimeout(_syncTimer);
@@ -146,11 +149,13 @@ async function pullAndMergeAppData() {
 
     // Map sheet keys back to local namespaced keys
     const sheetToLocal = {
-      tackle:    pfx()+'tackle',
-      rods:      pfx()+'rods',
-      favorites: pfx()+'favs',
-      settings:  pfx()+'settings',
-      crops:     pfx()+'crops',
+      tackle:     pfx()+'tackle',
+      rods:       pfx()+'rods',
+      favorites:  pfx()+'favs',
+      pinnedfavs: pfx()+'pinnedfavs',
+      settings:   pfx()+'settings',
+      crops:      pfx()+'crops',
+      lostlures:  pfx()+'lostlures',
     };
 
     Object.entries(sheetToLocal).forEach(([sheetKey, localKey]) => {
@@ -207,7 +212,8 @@ async function manualSync() {
 /* ═══════════════════════════════════════════════════════════
    PAGE NAVIGATION
 ═══════════════════════════════════════════════════════════ */
-let _skipLogReset = false;
+let _skipLogReset      = false;
+let _skipLostLureReset = false;
 
 function navTo(pageId) {
   const current = _pageStack[_pageStack.length - 1];
@@ -218,8 +224,12 @@ function navTo(pageId) {
   if (pageId === 'page-spots')       prepSpotsPage();
   if (pageId === 'page-all-catches') prepAllCatches();
   if (pageId === 'page-all-favs')    prepAllFavs();
-  if (pageId === 'page-tackle')      renderTackleList();
-  if (pageId === 'page-rods')        renderRodList();
+  if (pageId === 'page-pin-favs')    prepPinFavs();
+  if (pageId === 'page-tackle')           renderTackleList();
+  if (pageId === 'page-rods')             renderRodList();
+  if (pageId === 'page-lost-lures')       renderLostLures();
+  if (pageId === 'page-lost-lure-add' && !_skipLostLureReset) resetLostLureForm();
+  _skipLostLureReset = false;
   if (pageId === 'page-shops')       { renderShops(); populateShopStateFilter(); }
   if (pageId === 'page-shop-add' && !_skipShopReset) resetShopForm();
   _skipShopReset = false;
@@ -282,6 +292,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   setDateTimeNow('fDate');
   refreshLureDropdown();
   refreshRodDropdown();
+
+  // Fetch sunrise/sunset when city field loses focus or state changes
+  document.getElementById('fCity').addEventListener('blur', fetchSunForCity);
+  document.getElementById('fState').addEventListener('change', () => {
+    if (document.getElementById('fCity').value.trim()) fetchSunForCity();
+  });
 
   if (!CONFIG.WEB_APP_URL) {
     document.getElementById('configBanner').style.display = 'flex';
@@ -367,6 +383,11 @@ function toggleFav(id, e) {
   renderFavs();
   renderCatches(filtered);
   renderStats(filtered);
+  // Also refresh the all-favs page if it's currently visible
+  const allFavsPage = document.getElementById('page-all-favs');
+  if (allFavsPage && allFavsPage.classList.contains('active')) {
+    prepAllFavs();
+  }
 }
 
 function renderFavs() {
@@ -374,23 +395,63 @@ function renderFavs() {
   const footer = document.getElementById('favLogFooter');
   const count  = document.getElementById('favLogCount');
   const favs   = getFavs();
-  const favCatches = allCatches.filter(c => favs.includes(String(c.id)));
+  const pageSize = getCatchPageSize();
 
-  if (!favCatches.length) {
+  // All favorited catches sorted newest first
+  const allFavCatches = allCatches
+    .filter(c => favs.includes(String(c.id)))
+    .sort((a,b) => new Date(b.date) - new Date(a.date));
+
+  if (!allFavCatches.length) {
     el.innerHTML = `<div class="empty-state"><div class="fish-big">🤍</div><h3>No favorites yet</h3><p>Tap the ♡ on any catch to add it here.</p></div>`;
     if (footer) footer.style.display = 'none';
     if (count)  count.textContent = '';
     return;
   }
 
-  const sorted   = [...favCatches].sort((a,b) => new Date(b.date)-new Date(a.date));
-  const pageSize = getCatchPageSize();
-  el.innerHTML   = sorted.slice(0, pageSize).map((c,i) => buildCatchCard(c,i,true)).join('');
+  // If total favorites fit within page size, show them all — no need for pinning
+  const pinned = getPinnedFavs();
+  let shown;
+  if (allFavCatches.length <= pageSize) {
+    // Fits on screen — show everything, pinned list irrelevant
+    shown = allFavCatches;
+  } else if (pinned && Array.isArray(pinned) && pinned.length > 0) {
+    // More than fit — use the pinned selection
+    const pinnedSet = new Set(pinned.map(String));
+    let pinnedShown = allFavCatches.filter(c => pinnedSet.has(String(c.id)));
+    // If saved pinned list has fewer than pageSize (e.g. saved before a bug fix),
+    // fill remaining slots with the newest non-pinned favs
+    if (pinnedShown.length < pageSize) {
+      const extra = allFavCatches
+        .filter(c => !pinnedSet.has(String(c.id)))
+        .slice(0, pageSize - pinnedShown.length);
+      pinnedShown = [...pinnedShown, ...extra];
+    }
+    shown = pinnedShown.slice(0, pageSize);
+  } else {
+    // More than fit but no pinned selection yet — show most recent
+    shown = allFavCatches.slice(0, pageSize);
+  }
 
-  if (footer) footer.style.display = sorted.length > pageSize ? 'flex' : 'none';
-  if (count)  count.textContent    = sorted.length > pageSize
-    ? `Showing ${pageSize} of ${sorted.length} favorites`
-    : `${sorted.length} favorite${sorted.length !== 1 ? 's' : ''}`;
+  el.innerHTML = shown.map((c,i) => buildCatchCard(c,i,true)).join('');
+
+  // Show footer if: more favs than page size OR pinned selection hides some catches
+  const hasPinnedHidden = pinned && Array.isArray(pinned) && allFavCatches.length > shown.length;
+  const hasMore         = allFavCatches.length > pageSize;
+  const showFooter      = hasMore || hasPinnedHidden;
+
+  if (footer) footer.style.display = showFooter ? 'flex' : 'none';
+  if (count) {
+    if (hasPinnedHidden && !hasMore) {
+      count.textContent = `${shown.length} pinned shown · ${allFavCatches.length} total favorites`;
+    } else if (hasMore) {
+      count.textContent = pinned && pinned.length
+        ? `${shown.length} pinned · ${allFavCatches.length} total`
+        : `Showing ${shown.length} of ${allFavCatches.length} favorites`;
+    } else {
+      count.textContent = `${allFavCatches.length} favorite${allFavCatches.length !== 1 ? 's' : ''}`;
+    }
+  }
 }
 
 function prepAllFavs() {
@@ -399,6 +460,245 @@ function prepAllFavs() {
   const sorted     = [...favCatches].sort((a,b) => new Date(b.date)-new Date(a.date));
   document.getElementById('allFavsTitle').textContent = `All Favorites (${sorted.length})`;
   document.getElementById('allFavsBody').innerHTML = sorted.map((c,i) => buildCatchCard(c,i,true)).join('');
+}
+
+// Temp selection state for the pin page
+let _pinSelection = new Set();
+
+function prepPinFavs() {
+  const favs      = getFavs();
+  const pageSize  = getCatchPageSize();
+  const pinned    = getPinnedFavs();
+  const favCatches = allCatches
+    .filter(c => favs.includes(String(c.id)))
+    .sort((a,b) => new Date(b.date)-new Date(a.date));
+
+  // Pre-select currently pinned list if it exists and is full-sized,
+  // otherwise pre-select the most recent up to pageSize
+  if (pinned && Array.isArray(pinned) && pinned.length >= pageSize) {
+    // Valid saved list — filter to only still-favorited catches
+    const validIds = new Set(favCatches.map(c => String(c.id)));
+    _pinSelection = new Set(pinned.map(String).filter(id => validIds.has(id)));
+  } else {
+    // No saved list, or saved list is undersized (old bug) — start fresh with most recent
+    _pinSelection = new Set(favCatches.slice(0, pageSize).map(c => String(c.id)));
+  }
+
+  updatePinLimitBar(pageSize);
+  renderPinList(favCatches, pageSize);
+}
+
+function updatePinLimitBar(pageSize) {
+  const el = document.getElementById('pinLimitBar');
+  if (!el) return;
+  const remaining = pageSize - _pinSelection.size;
+  if (remaining <= 0) {
+    el.textContent = `Limit reached — ${pageSize}/${pageSize} selected. Deselect one to swap.`;
+  } else {
+    el.textContent = `Select up to ${pageSize} favorites to show on the home screen. ${_pinSelection.size}/${pageSize} selected.`;
+  }
+}
+
+function renderPinList(favCatches, pageSize) {
+  const el = document.getElementById('pinFavsList');
+  el.innerHTML = favCatches.map(c => {
+    const sel      = _pinSelection.has(String(c.id));
+    const atLimit  = _pinSelection.size > pageSize - 1 && !sel;
+    const dt       = c.date ? new Date(c.date).toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'}) : '';
+    const thumb    = c.photoUrl && c.photoUrl.trim()
+      ? `<img class="pin-fav-thumb" src="${esc(c.photoUrl)}" referrerpolicy="no-referrer" />`
+      : `<div class="pin-fav-thumb-placeholder">${getFishEmoji(c.fish)}</div>`;
+    return `<div class="pin-fav-item${sel?' selected':''}${atLimit?' disabled':''}"
+        onclick="togglePinFav('${esc(c.id)}',${pageSize})">
+      ${thumb}
+      <div class="pin-fav-info">
+        <div class="pin-fav-name">${esc(c.fish||'—')}</div>
+        <div class="pin-fav-meta">${[c.weight?parseFloat(c.weight).toFixed(2)+' lb':'',c.location,dt].filter(Boolean).join(' · ')}</div>
+      </div>
+      <div class="pin-fav-check">${sel?'✓':''}</div>
+    </div>`;
+  }).join('');
+}
+
+function togglePinFav(id, pageSize) {
+  const sid = String(id);
+  if (_pinSelection.has(sid)) {
+    _pinSelection.delete(sid);
+  } else {
+    if (_pinSelection.size > pageSize - 1) {
+      // Already at the limit — block and show message
+      showToast(`You can only pin ${pageSize} favorites. Deselect one first.`, 'error');
+      return;
+    }
+    _pinSelection.add(sid);
+  }
+  updatePinLimitBar(pageSize);
+  const favs      = getFavs();
+  const favCatches = allCatches
+    .filter(c => favs.includes(String(c.id)))
+    .sort((a,b) => new Date(b.date)-new Date(a.date));
+  renderPinList(favCatches, pageSize);
+}
+
+function savePinnedFavs() {
+  savePinnedFavsLS([..._pinSelection]);
+  showToast('Pinned favorites saved!', 'success');
+  navBack();
+  renderFavs();
+}
+
+/* ═══════════════════════════════════════════════════════════
+   LOST LURES
+═══════════════════════════════════════════════════════════ */
+
+function getLostLures()     { return ls.get(pfx()+'lostlures', []); }
+function saveLostLuresLS(a) { setSynced(pfx()+'lostlures', a); }
+
+function renderLostLures() {
+  const lures   = getLostLures();
+  const list    = document.getElementById('lostLureList');
+  const empty   = document.getElementById('lostLureEmpty');
+  const statBar = document.getElementById('lostStatBar');
+  if (!list) return;
+
+  if (statBar) {
+    const total     = lures.length;
+    const totalCost = lures.reduce((sum,l) => sum + (parseFloat(l.price)||0), 0);
+    if (total) {
+      statBar.style.display = 'flex';
+      statBar.innerHTML = `
+        <div class="lost-stat"><div class="lost-stat-val">${total}</div><div class="lost-stat-lbl">Lost</div></div>
+        <div class="lost-stat"><div class="lost-stat-val">$${totalCost.toFixed(2)}</div><div class="lost-stat-lbl">Total Value</div></div>`;
+    } else {
+      statBar.style.display = 'none';
+    }
+  }
+
+  if (!lures.length) {
+    list.innerHTML = '';
+    if (empty) empty.style.display = 'block';
+    return;
+  }
+  if (empty) empty.style.display = 'none';
+
+  const sorted = [...lures].sort((a,b) => (b.dateLost||'') > (a.dateLost||'') ? 1 : -1);
+  list.innerHTML = sorted.map(l => {
+    const label = l.name + (l.color ? ` (${l.color})` : '');
+    const meta  = [l.dateLost, l.where, l.price ? '$'+parseFloat(l.price).toFixed(2) : ''].filter(Boolean).join(' · ');
+    return `<div class="lost-lure-item" onclick="openLostLureDetail('${esc(l.id)}')">
+      <div class="lost-lure-icon">💀</div>
+      <div class="lost-lure-info">
+        <div class="lost-lure-name">${esc(label)}</div>
+        ${meta ? `<div class="lost-lure-meta">${esc(meta)}</div>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function openLostLureDetail(id) {
+  const l = getLostLures().find(x => x.id === id);
+  if (!l) return;
+  document.getElementById('lostLureDetailName').textContent = l.name + (l.color ? ` (${l.color})` : '');
+  const fields = [
+    {label:'Lure Name',      value: l.name     ||'—'},
+    {label:'Color',          value: l.color    ||'—'},
+    {label:'Brand',          value: l.brand    ||'—'},
+    {label:'Details',        value: l.details  ||'—'},
+    {label:'Price',          value: l.price    ? '$'+parseFloat(l.price).toFixed(2) : '—'},
+    {label:'Date Lost',      value: l.dateLost ||'—'},
+    {label:'Where Lost',     value: l.where    ||'—'},
+    {label:'Cause of Death', value: l.cause    ||'—'},
+  ];
+  document.getElementById('lostLureDetailGrid').innerHTML = fields.map(f =>
+    `<div class="gear-detail-item"><div class="gear-detail-label">${f.label}</div><div class="gear-detail-value">${esc(f.value)}</div></div>`
+  ).join('');
+  document.getElementById('lleNameInput').value    = l.name     || '';
+  document.getElementById('lleColorInput').value   = l.color    || '';
+  document.getElementById('lleBrandInput').value   = l.brand    || '';
+  document.getElementById('llePriceInput').value   = l.price    || '';
+  document.getElementById('lleDetailsInput').value = l.details  || '';
+  document.getElementById('lleDateInput').value    = l.dateLost || '';
+  document.getElementById('lleWhereInput').value   = l.where    || '';
+  document.getElementById('lleCauseInput').value   = l.cause    || '';
+  document.getElementById('lostLureEditForm').classList.remove('show');
+  document.getElementById('lostLureDetailActions').innerHTML = `
+    <button class="btn btn-outline" onclick="toggleLostLureEditForm()">✏️ Edit</button>
+    <button class="btn btn-danger"  onclick="deleteLostLure('${esc(id)}')">🗑 Delete</button>
+    <button class="btn btn-primary" id="lostLureEditSaveBtn" onclick="saveLostLureEdit('${esc(id)}')" style="display:none">💾 Save</button>
+    <button class="btn btn-outline" id="lostLureEditCancelBtn" onclick="toggleLostLureEditForm()" style="display:none">Cancel</button>`;
+  navTo('page-lost-lure-detail');
+}
+
+function toggleLostLureEditForm() {
+  const form    = document.getElementById('lostLureEditForm');
+  const saveBtn = document.getElementById('lostLureEditSaveBtn');
+  const canBtn  = document.getElementById('lostLureEditCancelBtn');
+  const editBtn = document.querySelector('#lostLureDetailActions .btn-outline');
+  const show    = form.classList.toggle('show');
+  saveBtn.style.display = show ? '' : 'none';
+  canBtn.style.display  = show ? '' : 'none';
+  if (editBtn) editBtn.style.display = show ? 'none' : '';
+}
+
+function saveLostLureEdit(id) {
+  const name = document.getElementById('lleNameInput').value.trim();
+  if (!name) { showToast('Lure name is required.','error'); return; }
+  const lures = getLostLures();
+  const idx   = lures.findIndex(x => x.id === id);
+  if (idx < 0) return;
+  lures[idx] = { ...lures[idx], name,
+    color:    document.getElementById('lleColorInput').value.trim(),
+    brand:    document.getElementById('lleBrandInput').value.trim(),
+    price:    document.getElementById('llePriceInput').value,
+    details:  document.getElementById('lleDetailsInput').value.trim(),
+    dateLost: document.getElementById('lleDateInput').value,
+    where:    document.getElementById('lleWhereInput').value.trim(),
+    cause:    document.getElementById('lleCauseInput').value.trim(),
+  };
+  saveLostLuresLS(lures);
+  showToast('Lost lure updated!','success');
+  navBack();
+  renderLostLures();
+}
+
+function submitLostLure() {
+  const name = document.getElementById('llName').value.trim();
+  if (!name) { showToast('Lure name is required!','error'); return; }
+  const lures = getLostLures();
+  const entry = {
+    id:       Date.now().toString(36) + Math.random().toString(36).slice(2),
+    name,
+    color:    document.getElementById('llColor').value.trim(),
+    brand:    document.getElementById('llBrand').value.trim(),
+    price:    document.getElementById('llPrice').value,
+    details:  document.getElementById('llDetails').value.trim(),
+    dateLost: document.getElementById('llDate').value,
+    where:    document.getElementById('llWhere').value.trim(),
+    cause:    document.getElementById('llCause').value.trim(),
+  };
+  lures.push(entry);
+  saveLostLuresLS(lures);
+  showToast('💀 Lure logged as lost!','success');
+  resetLostLureForm();
+  navBack();
+  renderLostLures();
+}
+
+function deleteLostLure(id) {
+  if (!confirm('Remove this lure from your lost list?')) return;
+  saveLostLuresLS(getLostLures().filter(x => x.id !== id));
+  showToast('Removed.','success');
+  navBack();
+  renderLostLures();
+}
+
+function resetLostLureForm() {
+  ['llName','llColor','llBrand','llPrice','llDetails','llWhere','llCause'].forEach(id => {
+    document.getElementById(id).value = '';
+  });
+  document.getElementById('llDate').value = new Date().toISOString().slice(0,10);
+  document.getElementById('lostLureFormTitle').textContent = 'Log Lost Lure';
+  document.getElementById('lostLureSaveBtn').textContent   = '💀 Save';
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -662,6 +962,11 @@ async function submitCatch() {
     photo:         photoB64,
     existingPhoto: document.getElementById('fExistingPhoto').value,
     cropPos:       document.getElementById('fCropPos').value || 'center center',
+    city:          document.getElementById('fCity').value.trim(),
+    lat:           document.getElementById('fLat').value !== '' ? parseFloat(document.getElementById('fLat').value) : '',
+    lon:           document.getElementById('fLon').value !== '' ? parseFloat(document.getElementById('fLon').value) : '',
+    sunrise:       document.getElementById('fSunrise').value,
+    sunset:        document.getElementById('fSunset').value,
   };
 
   try {
@@ -723,17 +1028,25 @@ function populateFilters() {
   lureSel.innerHTML = '<option value="">All Lures</option>';
   lures.forEach(l => lureSel.insertAdjacentHTML('beforeend', `<option value="${esc(l)}">${esc(l)}</option>`));
 
+  const cities = [...new Set(allCatches.map(c=>c.city).filter(Boolean).map(c=>c.trim()))].sort();
+  const citySel = document.getElementById('filterCity');
+  citySel.innerHTML = '<option value="">All Cities</option>';
+  cities.forEach(c => citySel.insertAdjacentHTML('beforeend', `<option value="${esc(c)}">${esc(c)}</option>`));
+
   // Autocomplete datalists
   const buddyDL = document.getElementById('buddySuggestions');
   if (buddyDL) { buddyDL.innerHTML = getBuddyStats().map(b=>`<option value="${esc(b.name)}">`).join(''); }
   const locDL = document.getElementById('locationSuggestions');
   if (locDL) { locDL.innerHTML = [...new Set(allCatches.map(c=>c.location).filter(Boolean).map(l=>l.trim()))].sort().map(s=>`<option value="${esc(s)}">`).join(''); }
+  const cityDL = document.getElementById('citySuggestions');
+  if (cityDL) { cityDL.innerHTML = [...new Set(allCatches.map(c=>c.city).filter(Boolean).map(c=>c.trim()))].sort().map(s=>`<option value="${esc(s)}">`).join(''); }
 }
 
 function applyFilters() {
   const tripVal  = document.getElementById('filterTrip').value;
   const fishVal  = document.getElementById('filterFish').value;
   const stateVal = document.getElementById('filterState').value;
+  const cityVal  = document.getElementById('filterCity').value;
   const lureVal  = document.getElementById('filterLure').value;
   const monthVal = document.getElementById('filterMonth').value;
   const search   = document.getElementById('searchInput').value.toLowerCase();
@@ -742,6 +1055,7 @@ function applyFilters() {
     if (tripVal  && c.trip  !== tripVal)  return false;
     if (fishVal  && c.fish  !== fishVal)  return false;
     if (stateVal && c.state !== stateVal) return false;
+    if (cityVal  && (c.city||'').trim() !== cityVal) return false;
     if (lureVal  && c.lure  !== lureVal)  return false;
     if (monthVal !== '' && monthVal !== undefined) {
       if (!c.date) return false;
@@ -759,7 +1073,7 @@ function applyFilters() {
 }
 
 function clearFilters() {
-  ['filterTrip','filterFish','filterState','filterLure','filterMonth','searchInput'].forEach(id => document.getElementById(id).value='');
+  ['filterTrip','filterFish','filterState','filterCity','filterLure','filterMonth','searchInput'].forEach(id => document.getElementById(id).value='');
   applyFilters();
 }
 
@@ -799,22 +1113,338 @@ function getFishEmoji(name) {
   for (const [k,v] of Object.entries(FISH_EMOJI)) { if(k!=='default'&&key.includes(k)) return v; }
   return FISH_EMOJI.default;
 }
-function minsToTimeStr(m) { const h=Math.floor(m/60)%24,mn=Math.round(m%60); return `${h%12||12}:${String(mn).padStart(2,'0')} ${h<12?'AM':'PM'}`; }
+/* ─── GEOCODE + SUNRISE API ──────────────────────────────────
+   When a city is entered on the catch form:
+   1. Geocode city+state → lat/lon via OpenStreetMap Nominatim
+   2. Fetch exact sunrise/sunset from sunrise-sunset.org
+   3. Store in hidden form fields so they get saved with the catch
+   Falls back to pure-math state-center calculation for old catches
+   that don't have saved lat/lon/sunrise/sunset.
+──────────────────────────────────────────────────────────── */
+
+// Called when the City field loses focus
+async function fetchSunForCity() {
+  const city  = document.getElementById('fCity').value.trim();
+  const state = document.getElementById('fState').value;
+  const date  = document.getElementById('fNoTime').checked
+    ? document.getElementById('fDateOnly').value
+    : document.getElementById('fDate').value;
+
+  const preview = document.getElementById('sunPreview');
+
+  // Clear if no city entered
+  if (!city) {
+    preview.textContent = '';
+    ['fLat','fLon','fSunrise','fSunset'].forEach(id => document.getElementById(id).value = '');
+    return;
+  }
+
+  preview.textContent = '⏳ Looking up sunrise/sunset…';
+
+  try {
+    // Step 1: Geocode via OpenStreetMap Nominatim
+    const query    = encodeURIComponent(`${city}${state ? ', ' + state : ''}, USA`);
+    const geoResp  = await fetch(`https://nominatim.openstreetmap.org/search?q=${query}&format=json&limit=1`, {
+      headers: { 'Accept-Language': 'en', 'User-Agent': 'FishingLog/1.0' }
+    });
+    const geoData  = await geoResp.json();
+    if (!geoData.length) throw new Error('City not found');
+
+    const lat = parseFloat(geoData[0].lat);
+    const lon = parseFloat(geoData[0].lon);
+
+    // Step 2: Fetch sunrise/sunset using the location's correct timezone
+    // Pass tzid so the API returns local times, not UTC
+    const STATE_TZ = {
+      "Alabama":"America/Chicago","Alaska":"America/Anchorage","Arizona":"America/Phoenix",
+      "Arkansas":"America/Chicago","California":"America/Los_Angeles","Colorado":"America/Denver",
+      "Connecticut":"America/New_York","Delaware":"America/New_York","Florida":"America/New_York",
+      "Georgia":"America/New_York","Hawaii":"Pacific/Honolulu","Idaho":"America/Denver",
+      "Illinois":"America/Chicago","Indiana":"America/Indiana/Indianapolis","Iowa":"America/Chicago",
+      "Kansas":"America/Chicago","Kentucky":"America/New_York","Louisiana":"America/Chicago",
+      "Maine":"America/New_York","Maryland":"America/New_York","Massachusetts":"America/New_York",
+      "Michigan":"America/Detroit","Minnesota":"America/Chicago","Mississippi":"America/Chicago",
+      "Missouri":"America/Chicago","Montana":"America/Denver","Nebraska":"America/Chicago",
+      "Nevada":"America/Los_Angeles","New Hampshire":"America/New_York","New Jersey":"America/New_York",
+      "New Mexico":"America/Denver","New York":"America/New_York","North Carolina":"America/New_York",
+      "North Dakota":"America/Chicago","Ohio":"America/New_York","Oklahoma":"America/Chicago",
+      "Oregon":"America/Los_Angeles","Pennsylvania":"America/New_York","Rhode Island":"America/New_York",
+      "South Carolina":"America/New_York","South Dakota":"America/Chicago","Tennessee":"America/Chicago",
+      "Texas":"America/Chicago","Utah":"America/Denver","Vermont":"America/New_York",
+      "Virginia":"America/New_York","Washington":"America/Los_Angeles","West Virginia":"America/New_York",
+      "Wisconsin":"America/Chicago","Wyoming":"America/Denver"
+    };
+    // The API returns UTC times even with tzid in some cases.
+    // We'll convert UTC → local ourselves using a UTC offset for the state.
+    // We use the JS Intl API to get the actual UTC offset for the state's timezone
+    // on the specific catch date (handles DST automatically).
+    const tzid      = STATE_TZ[document.getElementById('fState').value] || 'America/New_York';
+    const catchDate = date ? date.slice(0, 10) : new Date().toISOString().slice(0, 10);
+    const sunResp   = await fetch(`https://api.sunrise-sunset.org/json?lat=${lat}&lng=${lon}&date=${catchDate}&formatted=0`);
+    const sunData   = await sunResp.json();
+    if (sunData.status !== 'OK') throw new Error('Sunrise API error');
+
+    // Get UTC offset in minutes for the catch location's timezone on the catch date
+    // Intl.DateTimeFormat with timeZone handles DST correctly
+    const getUtcOffsetMins = (tzId, dateStr) => {
+      const d = new Date(dateStr + 'T12:00:00Z');
+      const utcStr   = d.toLocaleString('en-US', { timeZone: 'UTC' });
+      const localStr = d.toLocaleString('en-US', { timeZone: tzId });
+      const utcDate  = new Date(utcStr);
+      const locDate  = new Date(localStr);
+      return (locDate - utcDate) / 60000; // minutes
+    };
+
+    const offsetMins = getUtcOffsetMins(tzid, catchDate);
+
+    // Convert UTC ISO string to local HH:MM
+    const toLocalTime = (isoStr) => {
+      const utcDate = new Date(isoStr);
+      const localMs = utcDate.getTime() + offsetMins * 60000;
+      const localDate = new Date(localMs);
+      const h = localDate.getUTCHours();
+      const m = localDate.getUTCMinutes();
+      return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+    };
+
+    const sunriseLocal = toLocalTime(sunData.results.sunrise);
+    const sunsetLocal  = toLocalTime(sunData.results.sunset);
+
+    // Store as "HHMM" without colon — Google Sheets auto-converts "HH:MM"
+    // into a time serial number, corrupting the value on read-back.
+    // "2115" is just a number string Sheets won't touch.
+    const toStorable = (hhmm) => hhmm ? hhmm.replace(':', '') : '';
+
+    document.getElementById('fLat').value     = lat;
+    document.getElementById('fLon').value     = lon;
+    document.getElementById('fSunrise').value = toStorable(sunriseLocal);
+    document.getElementById('fSunset').value  = toStorable(sunsetLocal);
+
+    // Show preview using formatted display (still HH:MM for display)
+    const srDisp = fmtTimeStr(sunriseLocal);
+    const ssDisp = fmtTimeStr(sunsetLocal);
+    preview.innerHTML = `🌅 Sunrise ${srDisp}<br>🌇 Sunset ${ssDisp}`;
+
+  } catch(err) {
+    console.warn('Sun fetch failed:', err.message);
+    preview.textContent = '⚠️ Could not fetch — will use state average';
+    ['fLat','fLon','fSunrise','fSunset'].forEach(id => document.getElementById(id).value = '');
+  }
+}
+
+// Format stored "HHMM" or "HH:MM" string to "7:34 AM" display
+function fmtTimeStr(hhmm) {
+  if (!hhmm) return '—';
+  const s = String(hhmm).trim();
+  let h, m;
+  if (s.includes(':')) {
+    [h, m] = s.split(':').map(Number);
+  } else if (s.length === 4) {
+    h = parseInt(s.slice(0, 2));
+    m = parseInt(s.slice(2, 4));
+  } else if (s.length === 3) {
+    h = parseInt(s.slice(0, 1));
+    m = parseInt(s.slice(1, 3));
+  } else {
+    return '—';
+  }
+  if (isNaN(h) || isNaN(m)) return '—';
+  const ampm = h < 12 ? 'AM' : 'PM';
+  const h12  = h % 12 || 12;
+  return `${h12}:${String(m).padStart(2,'0')} ${ampm}`;
+}
+
+// Convert stored "HHMM" or "HH:MM" to minutes since midnight
+function hmToMins(hhmm) {
+  if (!hhmm) return null;
+  const s = String(hhmm).trim();
+  let h, m;
+  if (s.includes(':')) {
+    [h, m] = s.split(':').map(Number);
+  } else if (s.length === 4) {
+    h = parseInt(s.slice(0, 2));
+    m = parseInt(s.slice(2, 4));
+  } else if (s.length === 3) {
+    h = parseInt(s.slice(0, 1));
+    m = parseInt(s.slice(1, 3));
+  } else {
+    return null;
+  }
+  if (isNaN(h) || isNaN(m)) return null;
+  return h * 60 + m;
+}
+
+/* ─── SUNRISE / SUNSET CALCULATION ─────────────────────────
+   Pure-math implementation of the NOAA solar position algorithm.
+   Uses each catch's state to look up approximate center lat/lon.
+   Accurate to within ~5 minutes for any US location.
+──────────────────────────────────────────────────────────── */
+
+const STATE_COORDS = {
+  "Alabama":{"lat":32.8,"lon":-86.8},"Alaska":{"lat":64.2,"lon":-153.4},
+  "Arizona":{"lat":34.3,"lon":-111.1},"Arkansas":{"lat":34.8,"lon":-92.2},
+  "California":{"lat":36.8,"lon":-119.4},"Colorado":{"lat":39.0,"lon":-105.5},
+  "Connecticut":{"lat":41.6,"lon":-72.7},"Delaware":{"lat":39.0,"lon":-75.5},
+  "Florida":{"lat":27.8,"lon":-81.6},"Georgia":{"lat":32.7,"lon":-83.4},
+  "Hawaii":{"lat":20.3,"lon":-156.4},"Idaho":{"lat":44.4,"lon":-114.5},
+  "Illinois":{"lat":40.0,"lon":-89.2},"Indiana":{"lat":40.0,"lon":-86.1},
+  "Iowa":{"lat":42.0,"lon":-93.3},"Kansas":{"lat":38.5,"lon":-98.4},
+  "Kentucky":{"lat":37.5,"lon":-85.3},"Louisiana":{"lat":31.2,"lon":-91.8},
+  "Maine":{"lat":45.3,"lon":-69.0},"Maryland":{"lat":39.0,"lon":-76.8},
+  "Massachusetts":{"lat":42.3,"lon":-71.8},"Michigan":{"lat":44.3,"lon":-85.4},
+  "Minnesota":{"lat":46.4,"lon":-93.1},"Mississippi":{"lat":32.7,"lon":-89.7},
+  "Missouri":{"lat":38.5,"lon":-92.5},"Montana":{"lat":47.0,"lon":-110.5},
+  "Nebraska":{"lat":41.5,"lon":-99.9},"Nevada":{"lat":39.3,"lon":-116.6},
+  "New Hampshire":{"lat":43.7,"lon":-71.6},"New Jersey":{"lat":40.1,"lon":-74.5},
+  "New Mexico":{"lat":34.4,"lon":-106.1},"New York":{"lat":42.9,"lon":-75.5},
+  "North Carolina":{"lat":35.5,"lon":-79.4},"North Dakota":{"lat":47.5,"lon":-100.5},
+  "Ohio":{"lat":40.4,"lon":-82.8},"Oklahoma":{"lat":35.6,"lon":-97.5},
+  "Oregon":{"lat":44.0,"lon":-120.5},"Pennsylvania":{"lat":40.9,"lon":-77.8},
+  "Rhode Island":{"lat":41.7,"lon":-71.5},"South Carolina":{"lat":33.8,"lon":-80.9},
+  "South Dakota":{"lat":44.4,"lon":-100.3},"Tennessee":{"lat":35.9,"lon":-86.4},
+  "Texas":{"lat":31.5,"lon":-99.3},"Utah":{"lat":39.3,"lon":-111.1},
+  "Vermont":{"lat":44.1,"lon":-72.7},"Virginia":{"lat":37.8,"lon":-78.2},
+  "Washington":{"lat":47.4,"lon":-120.4},"West Virginia":{"lat":38.6,"lon":-80.6},
+  "Wisconsin":{"lat":44.3,"lon":-89.8},"Wyoming":{"lat":43.0,"lon":-107.6}
+};
+
+// Returns sunrise and sunset as minutes-since-midnight (local time) for a given date + state.
+// Returns null if state unknown or sun doesn't rise/set (polar extremes).
+function getSunTimes(dateObj, state) {
+  const coords = STATE_COORDS[state];
+  if (!coords) return null;
+
+  const lat  = coords.lat;
+  const lon  = coords.lon;
+  const rad  = Math.PI / 180;
+  const deg  = 180 / Math.PI;
+
+  // Julian day number
+  const jd = dateObj.getTime() / 86400000 + 2440587.5;
+  const n  = Math.round(jd - 2451545.0 + 0.5 - lon / 360);
+
+  // Mean solar noon
+  const jStar = n - lon / 360;
+
+  // Solar mean anomaly
+  const M = (357.5291 + 0.98560028 * jStar) % 360;
+
+  // Equation of centre
+  const C = 1.9148 * Math.sin(M * rad)
+           + 0.0200 * Math.sin(2 * M * rad)
+           + 0.0003 * Math.sin(3 * M * rad);
+
+  // Ecliptic longitude
+  const lam = (M + C + 180 + 102.9372) % 360;
+
+  // Solar transit
+  const jTransit = 2451545.0 + jStar + 0.0053 * Math.sin(M * rad)
+                 - 0.0069 * Math.sin(2 * lam * rad);
+
+  // Declination
+  const sinDec = Math.sin(lam * rad) * Math.sin(23.4397 * rad);
+  const cosDec = Math.cos(Math.asin(sinDec));
+
+  // Hour angle
+  const cosHa = (Math.sin(-0.833 * rad) - Math.sin(lat * rad) * sinDec)
+               / (Math.cos(lat * rad) * cosDec);
+
+  if (cosHa < -1 || cosHa > 1) return null; // midnight sun / polar night
+
+  const ha = Math.acos(cosHa) * deg;
+
+  const jRise = jTransit - ha / 360;
+  const jSet  = jTransit + ha / 360;
+
+  // Convert Julian days to local minutes-since-midnight
+  // Use UTC offset from the Date object as approximation
+  const utcOffsetMins = -dateObj.getTimezoneOffset();
+  const jdToLocalMins = (jd) => {
+    const totalMins = (jd - Math.floor(jd) + 0.5) * 1440 + utcOffsetMins;
+    return ((totalMins % 1440) + 1440) % 1440;
+  };
+
+  return {
+    sunrise: jdToLocalMins(jRise),
+    sunset:  jdToLocalMins(jSet),
+  };
+}
+
+function minsToRelStr(diffMins) {
+  const abs = Math.abs(Math.round(diffMins));
+  const h   = Math.floor(abs / 60);
+  const m   = abs % 60;
+  if (h === 0) return `${m}m`;
+  return m === 0 ? `${h}h` : `${h}h ${m}m`;
+}
+
+function minsToTimeStr(m) {
+  const h=Math.floor(m/60)%24, mn=Math.round(m%60);
+  return `${h%12||12}:${String(mn).padStart(2,'0')} ${h<12?'AM':'PM'}`;
+}
+
+function hasTime(c) {
+  const s = String(c.date||'');
+  return s.includes('T') && !s.endsWith('T00:00:00.000Z');
+}
+
+// Returns enriched time stats for a set of catches.
+// Groups into AM (before noon) and PM (after noon), calculates averages,
+// and for each group also computes avg offset from sunrise (AM) or sunset (PM).
 function calcAvgTimes(catches) {
-  const am=[],pm=[];
-  catches.forEach(c=>{
-    if (!c.date) return;
-    // Skip catches with no time — date-only entries come back as midnight UTC
-    // which would corrupt the averages. We detect them by checking if the
-    // stored string is just a date (no T) or ends at exactly midnight.
-    const dateStr = String(c.date);
-    if (!dateStr.includes('T') || dateStr.endsWith('T00:00:00.000Z')) return;
-    const d=new Date(c.date); if(isNaN(d)) return;
-    const m=d.getHours()*60+d.getMinutes();
-    (d.getHours()<12?am:pm).push(m);
+  const amMins=[], pmMins=[], amSunOffsets=[], pmSunOffsets=[];
+
+  catches.forEach(c => {
+    if (!c.date || !hasTime(c)) return;
+    const d = new Date(c.date);
+    if (isNaN(d)) return;
+    const mins = d.getHours()*60 + d.getMinutes();
+
+    // Use saved API values if available, else fall back to state-center math
+    let riseMins = null, setMins = null;
+    if (c.sunrise && c.sunset) {
+      riseMins = hmToMins(c.sunrise);
+      setMins  = hmToMins(c.sunset);
+    } else if (c.state) {
+      const sun = getSunTimes(d, c.state);
+      if (sun) { riseMins = sun.sunrise; setMins = sun.sunset; }
+    }
+
+    if (d.getHours() < 12) {
+      amMins.push(mins);
+      if (riseMins !== null) amSunOffsets.push(mins - riseMins);
+    } else {
+      pmMins.push(mins);
+      if (setMins !== null) pmSunOffsets.push(mins - setMins);
+    }
   });
-  const avg=a=>a.length?a.reduce((x,y)=>x+y,0)/a.length:null;
-  return { amAvg:avg(am), pmAvg:avg(pm), amCount:am.length, pmCount:pm.length };
+
+  const avg = arr => arr.length ? arr.reduce((a,b)=>a+b,0)/arr.length : null;
+
+  return {
+    amAvg:       avg(amMins),
+    pmAvg:       avg(pmMins),
+    amCount:     amMins.length,
+    pmCount:     pmMins.length,
+    amSunOffset: avg(amSunOffsets),
+    pmSunOffset: avg(pmSunOffsets),
+    amHasSun:    amSunOffsets.length > 0,
+    pmHasSun:    pmSunOffsets.length > 0,
+  };
+}
+
+function formatSunRelative(offsetMins, isAm) {
+  if (offsetMins === null) return '';
+  const rel = minsToRelStr(Math.abs(offsetMins));
+  if (isAm) {
+    return offsetMins < 0
+      ? `🌅 ${rel} before sunrise`
+      : `${rel} after sunrise`;
+  } else {
+    return offsetMins < 0
+      ? `${rel} before sunset`
+      : `🌙 ${rel} after sunset`;
+  }
 }
 
 function renderFishBreakdown(catches) {
@@ -823,11 +1453,17 @@ function renderFishBreakdown(catches) {
   const map={};
   catches.forEach(c=>{ if(!c.fish) return; if(!map[c.fish]) map[c.fish]={count:0,best:0,catches:[]}; map[c.fish].count++; const w=parseFloat(c.weight)||0; if(w>map[c.fish].best) map[c.fish].best=w; map[c.fish].catches.push(c); });
   el.innerHTML = Object.entries(map).sort((a,b)=>b[1].count-a[1].count).map(([name,s])=>{
-    const t=calcAvgTimes(s.catches);
-    let ts='';
-    if(t.amAvg!==null) ts+=`☀️ avg ${minsToTimeStr(t.amAvg)} (${t.amCount})`;
-    if(t.amAvg!==null&&t.pmAvg!==null) ts+=' · ';
-    if(t.pmAvg!==null) ts+=`🌇 avg ${minsToTimeStr(t.pmAvg)} (${t.pmCount})`;
+    const t = calcAvgTimes(s.catches);
+    let ts = '';
+    if (t.amAvg !== null) {
+      ts += `☀️ avg ${minsToTimeStr(t.amAvg)} (${t.amCount})`;
+      if (t.amHasSun) ts += ` · ${formatSunRelative(t.amSunOffset, true)}`;
+    }
+    if (t.amAvg !== null && t.pmAvg !== null) ts += '<br>';
+    if (t.pmAvg !== null) {
+      ts += `🌇 avg ${minsToTimeStr(t.pmAvg)} (${t.pmCount})`;
+      if (t.pmHasSun) ts += ` · ${formatSunRelative(t.pmSunOffset, false)}`;
+    }
     return `<div class="fish-card" onclick="openDrilldown('species','${esc(name)}')">
       <div class="fish-icon">${getFishEmoji(name)}</div>
       <div class="fish-info">
@@ -921,21 +1557,64 @@ function openDetail(id) {
   const photoHtml = c.photoUrl&&c.photoUrl.trim()
     ? `<img class="detail-photo" src="${esc(c.photoUrl)}" alt="${esc(c.fish)}" referrerpolicy="no-referrer" />`
     : `<div class="detail-photo-placeholder">${getFishEmoji(c.fish)}</div>`;
+
+  // Use saved sunrise/sunset if available, else fall back to state-center math
+  let sunriseStr = '—', sunsetStr = '—', sunRelStr = '';
+  let sunIsExact = false;
+  if (c.date && hasTime(c)) {
+    const d = new Date(c.date);
+    const catchMins = d.getHours()*60 + d.getMinutes();
+    let riseMins = null, setMins = null;
+
+    if (c.sunrise && c.sunset) {
+      // Saved exact values from API
+      riseMins   = hmToMins(c.sunrise);
+      setMins    = hmToMins(c.sunset);
+      sunriseStr = fmtTimeStr(c.sunrise);
+      sunsetStr  = fmtTimeStr(c.sunset);
+      sunIsExact = true;
+    } else if (c.state) {
+      // Fall back to pure-math state-center estimate
+      const sun = getSunTimes(d, c.state);
+      if (sun) {
+        riseMins   = Math.round(sun.sunrise);
+        setMins    = Math.round(sun.sunset);
+        sunriseStr = minsToTimeStr(riseMins) + ' (est.)';
+        sunsetStr  = minsToTimeStr(setMins)  + ' (est.)';
+      }
+    }
+
+    if (riseMins !== null && setMins !== null) {
+      if (catchMins < riseMins) {
+        sunRelStr = `🌙 ${minsToRelStr(riseMins - catchMins)} before sunrise`;
+      } else if (catchMins < setMins) {
+        sunRelStr = `☀️ ${minsToRelStr(catchMins - riseMins)} after sunrise · ${minsToRelStr(setMins - catchMins)} before sunset`;
+      } else {
+        sunRelStr = `🌙 ${minsToRelStr(catchMins - setMins)} after sunset`;
+      }
+    }
+  }
+
   const fields = [
     {label:'Weight',      value: c.weight?parseFloat(c.weight).toFixed(2)+' lbs':'—'},
     {label:'Date & Time', value: dt},
     {label:'State',       value: c.state?`${STATE_EMOJI[c.state]||'📍'} ${c.state}`:'—'},
+    {label:'City',        value: c.city||'—'},
     {label:'Location',    value: c.location||'—'},
+    {label: sunIsExact ? 'Sunrise (exact)' : 'Sunrise (est.)', value: sunriseStr},
+    {label: sunIsExact ? 'Sunset (exact)'  : 'Sunset (est.)',  value: sunsetStr},
     {label:'Lure / Bait', value: c.lure||'—'},
     {label:'Rod',         value: c.rod||'—'},
     {label:'Fished With', value: c.fishWith||'—'},
     {label:'Trip',        value: c.trip||'—'},
   ];
+
   document.getElementById('detailPageBody').innerHTML = `
     ${photoHtml}
     <div class="page-content">
       <div class="detail-fish-name">${esc(c.fish||'—')}</div>
       <div class="detail-grid">${fields.map(f=>`<div class="detail-item"><div class="detail-item-label">${f.label}</div><div class="detail-item-value">${esc(f.value)}</div></div>`).join('')}</div>
+      ${sunRelStr ? `<div class="detail-notes" style="font-family:'DM Mono',monospace;font-size:.78rem;color:var(--water-dk)">${esc(sunRelStr)}</div>` : ''}
       ${c.notes?`<div class="detail-notes"><div class="detail-item-label" style="margin-bottom:5px">Notes</div>${esc(c.notes)}</div>`:''}
       <div class="detail-actions">
         <button class="btn btn-outline" onclick="openEditCatch('${esc(c.id)}')">✏️ Edit</button>
@@ -965,7 +1644,19 @@ function openEditCatch(id) {
   document.getElementById('fLureCustom').value         = '';
   document.getElementById('fWith').value               = c.fishWith || '';
   document.getElementById('fLocation').value           = c.location || '';
+  document.getElementById('fCity').value               = c.city     || '';
   document.getElementById('fTrip').value               = c.trip     || '';
+  // Restore saved sun data
+  document.getElementById('fLat').value     = c.lat     || '';
+  document.getElementById('fLon').value     = c.lon     || '';
+  document.getElementById('fSunrise').value = c.sunrise || '';
+  document.getElementById('fSunset').value  = c.sunset  || '';
+  const sp = document.getElementById('sunPreview');
+  if (c.sunrise && c.sunset) {
+    sp.innerHTML = `🌅 Sunrise ${fmtTimeStr(c.sunrise)}<br>🌇 Sunset ${fmtTimeStr(c.sunset)}`;
+  } else {
+    sp.textContent = '';
+  }
   document.getElementById('fNotes').value              = c.notes    || '';
   document.getElementById('fState').value              = c.state    || '';
   // Detect if this catch was saved without a time (date-only string has no 'T')
@@ -1085,6 +1776,12 @@ function openSpotCatches(location) {
 /* ═══════════════════════════════════════════════════════════
    SETTINGS
 ═══════════════════════════════════════════════════════════ */
+function toggleHowto(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.classList.toggle('open');
+}
+
 function saveSettings() {
   const settings={
     defaultState: document.getElementById('settingsDefaultState').value,
@@ -1106,12 +1803,13 @@ function copyShareUrl() {
    FORM HELPERS
 ═══════════════════════════════════════════════════════════ */
 function resetForm() {
-  ['fFish','fWeight','fLureCustom','fWith','fLocation','fTrip','fNotes'].forEach(id=>document.getElementById(id).value='');
+  ['fFish','fWeight','fLureCustom','fWith','fLocation','fCity','fTrip','fNotes'].forEach(id=>document.getElementById(id).value='');
+  ['fLat','fLon','fSunrise','fSunset'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('sunPreview').textContent = '';
   document.getElementById('fPhoto').value='';
   document.getElementById('fPhotoPreview').classList.remove('show');
   document.getElementById('fCropControl').classList.remove('show');
   document.getElementById('fCropPos').value = 'center center';
-  // Reset date/time toggle back to full datetime mode
   document.getElementById('fNoTime').checked = false;
   document.getElementById('fDate').style.display = '';
   document.getElementById('fDateOnly').style.display = 'none';
