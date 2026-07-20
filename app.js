@@ -39,6 +39,7 @@ function getCatchPageSize() {
 
 /* ─── APP STATE ─────────────────────────────────────────── */
 let allCatches = [];
+let _bestDayCatches = [];
 let filtered   = [];
 let _pageStack = ['page-home'];  // navigation history
 
@@ -706,6 +707,18 @@ function resetLostLureForm() {
 ═══════════════════════════════════════════════════════════ */
 function tackleLabelFor(t) { return t.name + (t.color ? ` (${t.color})` : ''); }
 
+// A catch matches a tackle item if its stored lure equals the full
+// "Name (Color)" label — or, for lures logged before color existed,
+// the bare name (only when the tackle item itself has no color set,
+// so two different colors of the same lure don't collide).
+function lureMatches(c, t) {
+  const stored = (c.lure || '').trim();
+  if (!stored) return false;
+  if (stored === tackleLabelFor(t)) return true;
+  if (!t.color && stored === t.name) return true;
+  return false;
+}
+
 function renderTackleList() {
   const tackle = getTackle();
   const el = document.getElementById('tackleList');
@@ -714,7 +727,7 @@ function renderTackleList() {
     return;
   }
   el.innerHTML = tackle.map((t,i) => {
-    const count = allCatches.filter(c => c.lure === t.name).length;
+    const count = allCatches.filter(c => lureMatches(c, t)).length;
     return `<div class="gear-item" onclick="openTackleDetail(${i})">
       <div class="gear-item-icon">🪱</div>
       <div class="gear-item-info">
@@ -759,13 +772,49 @@ function toggleTackleEditForm() {
   if (editBtn) editBtn.style.display = show ? 'none' : '';
 }
 
-function saveTackleEdit(i) {
+async function saveTackleEdit(i) {
   const name = document.getElementById('teNameInput').value.trim();
   if (!name) { showToast('Lure name is required.','error'); return; }
-  const tackle = getTackle();
-  tackle[i] = { name, color: document.getElementById('teColorInput').value.trim(), brand: document.getElementById('teBrandInput').value.trim(), details: document.getElementById('teDetailsInput').value.trim() };
+  const tackle  = getTackle();
+  const oldT    = tackle[i];
+  const oldLabel = tackleLabelFor(oldT);
+  const newT    = { name, color: document.getElementById('teColorInput').value.trim(), brand: document.getElementById('teBrandInput').value.trim(), details: document.getElementById('teDetailsInput').value.trim() };
+  const newLabel = tackleLabelFor(newT);
+  tackle[i] = newT;
   saveTackle(tackle);
-  showToast('Lure updated!','success');
+
+  // If the name and/or color actually changed, carry it over to every
+  // past catch logged under the old lure (instead of leaving them
+  // orphaned as a custom lure under the old name/color). Catches logged
+  // before this lure had a color may still be stored under the bare
+  // old name, so we check for that too.
+  const oldCandidates = [...new Set([oldLabel, oldT.name].filter(Boolean))];
+  const needsRename = oldLabel !== newLabel;
+  if (needsRename) {
+    showLoading('Updating past catches…');
+    try {
+      let totalUpdated = 0;
+      for (const oldName of oldCandidates) {
+        if (oldName === newLabel) continue;
+        const resp = await fetch(CONFIG.WEB_APP_URL, {
+          method: 'POST',
+          body: JSON.stringify({ action: 'renameLure', oldName, newName: newLabel }),
+        });
+        const data = await resp.json();
+        if (data.error) throw new Error(data.error);
+        totalUpdated += (data.updated || 0);
+      }
+      allCatches.forEach(c => { if (oldCandidates.includes((c.lure||'').trim())) c.lure = newLabel; });
+      applyFilters();
+      showToast(totalUpdated ? `Lure updated! ${totalUpdated} catch(es) relinked.` : 'Lure updated!', 'success');
+    } catch (err) {
+      console.error(err);
+      showToast('Lure updated, but updating past catches failed: ' + err.message, 'error');
+    } finally { hideLoading(); }
+  } else {
+    showToast('Lure updated!','success');
+  }
+
   navBack();
   renderTackleList();
   refreshLureDropdown();
@@ -797,7 +846,7 @@ function refreshLureDropdown() {
   sel.innerHTML = '<option value="">— Tackle Box —</option>';
   getTackle().forEach(t => {
     const o = document.createElement('option');
-    o.value = t.name; o.textContent = tackleLabelFor(t);
+    o.value = tackleLabelFor(t); o.textContent = tackleLabelFor(t);
     sel.appendChild(o);
   });
   sel.value = cur;
@@ -1102,9 +1151,48 @@ function renderStats(catches) {
     document.getElementById('statBiggest').textContent    = '—';
     document.getElementById('statBiggestFish').textContent = '';
   }
+
+  const best = computeBestDay(catches);
+  _bestDayCatches = best.catches;
+  if (best.key) {
+    const [y,m,d] = best.key.split('-').map(Number);
+    document.getElementById('statBestDay').textContent = new Date(y,m-1,d).toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'});
+    document.getElementById('statBestDayCount').textContent = best.catches.length + (best.catches.length===1 ? ' fish · tap →' : ' fish · tap →');
+  } else {
+    document.getElementById('statBestDay').textContent = '—';
+    document.getElementById('statBestDayCount').textContent = '';
+  }
+}
+
+// Groups catches by calendar day (local date, ignoring time) and returns
+// the day with the most catches, so "Best Day" reflects a single outing
+// rather than being skewed by timezone-edge timestamps.
+function computeBestDay(catches) {
+  const map = {};
+  catches.forEach(c => {
+    if (!c.date) return;
+    const d = new Date(c.date);
+    if (isNaN(d)) return;
+    const key = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+    (map[key] = map[key] || []).push(c);
+  });
+  let bestKey = null, bestCatches = [];
+  Object.entries(map).forEach(([k,arr]) => { if (arr.length > bestCatches.length) { bestKey = k; bestCatches = arr; } });
+  return { key: bestKey, catches: bestCatches };
+}
+
+function openBestDayCatches() {
+  if (!_bestDayCatches.length) return;
+  const sorted = [..._bestDayCatches].sort((a,b)=>new Date(a.date)-new Date(b.date));
+  const dateStr = new Date(sorted[0].date).toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'});
+  document.getElementById('bestDayCatchesTitle').textContent = '🏆 '+dateStr+' ('+sorted.length+')';
+  document.getElementById('bestDayCatchesBody').innerHTML = sorted.map((c,i)=>buildCatchCard(c,i,false)).join('');
+  navTo('page-best-day-catches');
 }
 function renderEmptyStats() {
-  ['statTotal','statSpecies','statBiggest','statTrips','statStates','statBuddies','statSpots'].forEach(id => document.getElementById(id).textContent='—');
+  ['statTotal','statSpecies','statBiggest','statTrips','statStates','statBuddies','statSpots','statBestDay'].forEach(id => document.getElementById(id).textContent='—');
+  document.getElementById('statBestDayCount').textContent = '';
+  _bestDayCatches = [];
 }
 
 /* ─── SPECIES BREAKDOWN ─────────────────────────────────── */
@@ -1677,8 +1765,8 @@ function openEditCatch(id) {
     } catch { setDateTimeNow('fDate'); }
   } else { setDateTimeNow('fDate'); }
   refreshLureDropdown();
-  const matchedLure = getTackle().find(t=>t.name===c.lure);
-  document.getElementById('fLure').value = matchedLure ? c.lure : '';
+  const matchedLure = getTackle().find(t=>lureMatches(c, t));
+  document.getElementById('fLure').value = matchedLure ? tackleLabelFor(matchedLure) : '';
   if (!matchedLure) document.getElementById('fLureCustom').value = c.lure || '';
   refreshRodDropdown();
   document.getElementById('fRod').value = c.rod || '';
@@ -1705,8 +1793,8 @@ function openEditCatch(id) {
 /* ─── DRILL-DOWN (species / state) ──────────────────────── */
 function openDrilldown(type, value) {
   let subset, title;
-  if (type==='species') { subset=allCatches.filter(c=>c.fish===value); title=`${getFishEmoji(value)} ${value} (${subset.length})`; }
-  else                  { subset=allCatches.filter(c=>c.state&&c.state.trim()===value); title=`${STATE_EMOJI[value]||'📍'} ${value} (${subset.length})`; }
+  if (type==='species') { subset=filtered.filter(c=>c.fish===value); title=`${getFishEmoji(value)} ${value} (${subset.length})`; }
+  else                  { subset=filtered.filter(c=>c.state&&c.state.trim()===value); title=`${STATE_EMOJI[value]||'📍'} ${value} (${subset.length})`; }
   document.getElementById('drilldownTitle').textContent = title;
   const sorted=[...subset].sort((a,b)=>new Date(b.date)-new Date(a.date));
   document.getElementById('drilldownBody').innerHTML = sorted.map((c,i)=>buildCatchCard(c,i,false)).join('');
