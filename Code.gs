@@ -13,7 +13,7 @@
 //  New catches will fill them automatically.
 // ═══════════════════════════════════════════════════════════
 
-const SHEET_ID    = "1OX2gqMVyQDfwJKoBrFKAC2uhqeCxPnpBDYNE3i3HTj0";
+const SHEET_ID    = "YOUR_SHEET_ID_HERE";
 const SHEET_TAB   = "Catches";
 const APPDATA_TAB = "AppData";
 const SHOPS_TAB   = "FishShops";
@@ -53,6 +53,7 @@ function doPost(e) {
     if (action === "addCatch")    return jsonResponse(addCatch(payload));
     if (action === "editCatch")   return jsonResponse(editCatch(payload));
     if (action === "deleteCatch") return jsonResponse(deleteCatch(payload.id));
+    if (action === "renameLure")  return jsonResponse(renameLure(payload));
     if (action === "saveAppData") return jsonResponse(saveAppData(payload));
     if (action === "addShop")     return jsonResponse(addShop(payload));
     if (action === "editShop")    return jsonResponse(editShop(payload));
@@ -158,6 +159,26 @@ function deleteCatch(id) {
     if (String(values[i][COL.ID])===String(id)) { sheet.deleteRow(i+1); return { success:true }; }
   }
   return { error:'Catch not found: '+id };
+}
+
+// Bulk-updates the Lure column on every catch row that matches oldName,
+// so renaming a lure in the Tackle Box carries over to past catches
+// instead of leaving them under the old name as an orphaned custom lure.
+function renameLure(data) {
+  const oldName = (data.oldName||'').trim();
+  const newName = (data.newName||'').trim();
+  if (!oldName || !newName) return { error:'Missing oldName/newName' };
+  if (oldName === newName) return { success:true, updated:0 };
+  const sheet  = getSheet();
+  const values = sheet.getDataRange().getValues();
+  let updated = 0;
+  for (let i=1;i<values.length;i++) {
+    if (String(values[i][COL.LURE]||'').trim() === oldName) {
+      sheet.getRange(i+1, COL.LURE+1).setValue(newName);
+      updated++;
+    }
+  }
+  return { success:true, updated };
 }
 
 // ═══════════════════════════════════════════════════════════

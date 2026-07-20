@@ -354,6 +354,7 @@
       <div class="stat-card"><div class="stat-label">States</div><div class="stat-value" id="statStates">—</div></div>
       <div class="stat-card"><div class="stat-label">Trips</div><div class="stat-value" id="statTrips">—</div></div>
 
+      <div class="stat-card stat-card-clickable" onclick="openBestDayCatches()"><div class="stat-label">Best Day</div><div class="stat-value" id="statBestDay">—</div><div class="stat-sub" id="statBestDayCount"></div></div>
       <div class="stat-card stat-card-clickable" onclick="navTo('page-buddies')"><div class="stat-label">Buddies</div><div class="stat-value" id="statBuddies">—</div><div class="stat-sub">tap →</div></div>
       <div class="stat-card stat-card-clickable" onclick="navTo('page-spots')"><div class="stat-label">Spots</div><div class="stat-value" id="statSpots">—</div><div class="stat-sub">tap →</div></div>
     </div>
@@ -890,6 +891,21 @@
       <span class="nav-title">Shop Details</span>
     </div>
     <div id="shopDetailBody"></div>
+  </div>
+
+
+  <!-- ════════════════════ BEST DAY CATCHES PAGE ════════════════════ -->
+  <div class="page" id="page-best-day-catches">
+    <div class="nav-bar">
+      <button class="nav-back" onclick="navBack()">
+        <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+        Home
+      </button>
+      <span class="nav-title" id="bestDayCatchesTitle">Best Day</span>
+    </div>
+    <div class="page-content">
+      <div class="catch-grid" id="bestDayCatchesBody"></div>
+    </div>
   </div>
 
 
