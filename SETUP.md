@@ -7,7 +7,7 @@ Everything you need to go from zero to a fully working personal fishing diary in
 ## What You're Building
 
 ```
-Your Browser  ←→  index.html + app.js  ←→  Google Apps Script  ←→  Google Sheet
+Your Browser  ←→  index.html + app.js  ←→  Google Apps Script  ←→  Google Sheet 
 ```
 
 - **index.html / app.js** — the app you open in any browser
