@@ -391,12 +391,33 @@ function toggleFav(id, e) {
   }
 }
 
+// True if any trip/species/state/city/lure/month filter or search box
+// currently has a value set.
+function filtersActive() {
+  return ['filterTrip','filterFish','filterState','filterCity','filterLure','filterMonth','searchInput']
+    .some(id => (document.getElementById(id).value || '').trim() !== '');
+}
+
 function renderFavs() {
-  const el     = document.getElementById('favGrid');
-  const footer = document.getElementById('favLogFooter');
-  const count  = document.getElementById('favLogCount');
-  const favs   = getFavs();
+  const el      = document.getElementById('favGrid');
+  const footer  = document.getElementById('favLogFooter');
+  const count   = document.getElementById('favLogCount');
+  const title   = document.getElementById('favSectionTitle');
+  const favs    = getFavs();
   const pageSize = getCatchPageSize();
+
+  // Favorites are meant to be a home-screen shortcut to your go-to
+  // catches, not a filtered view — hide the whole section while any
+  // filter or search is active so it doesn't look like a broken filter.
+  if (filtersActive()) {
+    if (title)  title.style.display  = 'none';
+    el.style.display = 'none';
+    if (footer) footer.style.display = 'none';
+    if (count)  count.textContent    = '';
+    return;
+  }
+  if (title) title.style.display = '';
+  el.style.display = '';
 
   // All favorited catches sorted newest first
   const allFavCatches = allCatches
